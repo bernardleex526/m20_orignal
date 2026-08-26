@@ -1,0 +1,33 @@
+# ============================================================================
+# Global Planner (Omnidirectional Hybrid A*) Parameters
+# ============================================================================
+
+planner:
+  # ---- Search Space ----
+  grid_resolution: 0.1                     # [m] planning grid cell size
+  num_heading_bins: 72                     # heading discretization (72 → 5° bins)
+  max_curvature: 0.5                       # [1/m] max path curvature κ_max
+  primitive_length: 0.3                    # [m] motion primitive step size
+  num_directions: 8                        # omnidirectional translation directions
+  num_rotations: 3                         # heading change options (straight, left, right)
+
+  # ---- Heuristic ----
+  heuristic_weight: 2.0                    # inflation factor (>1 for speed)
+  dijkstra_obstacle_weight: 1.0
+
+  # ---- Search Limits ----
+  time_limit_sec: 5.0                      # max planning time [s]
+  max_expansions: 100000                   # max A* node expansions
+
+  # ---- Cubic Spline Smoothing ----
+  spline_smoothness_weight: 0.4            # λ: higher = smoother path
+  spline_max_iterations: 10                # smoothing optimization iterations
+  spline_convergence_threshold: 0.001
+
+  # ---- Goal Tolerance ----
+  xy_goal_tolerance: 0.3                   # [m] position tolerance
+  yaw_goal_tolerance: 0.1                  # [rad] heading tolerance
+
+  # ---- Output ----
+  publish_plan: true
+  plan_topic: "/plan"

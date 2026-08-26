@@ -1,0 +1,36 @@
+# ============================================================================
+# Local Planner & Controller (DWA + LinePlanner) Parameters
+# ============================================================================
+
+controller:
+  # ---- Velocity Limits ----
+  max_linear_vel_x: 1.0                    # [m/s] forward
+  max_linear_vel_y: 0.5                    # [m/s] lateral (omnidirectional)
+  max_angular_vel: 1.0                     # [rad/s] yaw rate
+  max_linear_accel_x: 0.5                  # [m/s²] forward acceleration
+  max_linear_accel_y: 0.3                  # [m/s²] lateral acceleration
+  max_angular_accel: 1.5                   # [rad/s²] angular acceleration
+
+  # ---- DWA Sampling ----
+  num_vx_samples: 20
+  num_vy_samples: 10
+  num_omega_samples: 20
+  sim_time: 2.0                            # [s] forward simulation horizon
+  sim_dt: 0.1                              # [s] simulation time step
+
+  # ---- DWA Objective Weights ----
+  weight_path_clearance: 3.0               # obstacle avoidance
+  weight_goal_align: 2.0                   # goal heading/distance
+  weight_velocity_progress: 1.0            # progress along global path
+  weight_terrain_cost: 4.0                 # terrain traversability
+  weight_smoothness: 0.5                   # velocity continuity
+
+  # ---- LinePlanner Mode (Narrow Corridors) ----
+  lineplanner_lateral_gain: 0.5            # P gain for lateral drift compensation
+  lineplanner_yaw_threshold: 0.1           # [rad] threshold to switch between LINE/DWA
+  lineplanner_lookahead: 3.0               # [m] lookahead for straightness check
+
+  # ---- Output ----
+  publish_cmd_vel: true
+  cmd_vel_topic: "/cmd_vel"
+  control_frequency: 50.0                  # [Hz] control loop rate

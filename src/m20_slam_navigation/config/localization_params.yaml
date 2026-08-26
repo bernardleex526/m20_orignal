@@ -1,0 +1,29 @@
+# ============================================================================
+# Prior Map Relocalization Parameters
+# ============================================================================
+
+localization:
+  # ---- Prior Map ----
+  map_path: "full_cloud.pcd"               # path to pre-built static point cloud
+  map_voxel_leaf_size: 0.2                 # [m] downsampling for efficient matching
+
+  # ---- 3D NDT Matching ----
+  ndt_resolution: 1.0                      # [m] NDT grid resolution
+  ndt_max_iterations: 30                   # max Newton iterations
+  ndt_step_size: 0.1                       # gradient step size
+  ndt_epsilon: 0.0001                      # convergence threshold
+  ndt_outlier_ratio: 0.55                  # expected outlier fraction
+
+  # ---- Global Relocalization (Multi-Hypothesis) ----
+  num_hypotheses: 8                        # number of initial pose hypotheses
+  hypothesis_trans_range: 5.0              # [m] search radius in xy
+  hypothesis_rot_range: 3.14159            # [rad] search in yaw (full 360°)
+
+  # ---- ESKF (Error-State Kalman Filter) ----
+  eskf_accel_noise: 0.1                    # process noise: acceleration
+  eskf_gyro_noise: 0.01                    # process noise: angular velocity
+  eskf_accel_bias_noise: 0.0001            # accel bias random walk
+  eskf_gyro_bias_noise: 0.000001           # gyro bias random walk
+  eskf_ndt_pos_noise: 0.1                  # NDT observation noise: position [m]
+  eskf_ndt_rot_noise: 0.05                 # NDT observation noise: rotation [rad]
+  eskf_odom_pos_noise: 0.02                # foot odometry observation noise [m]

@@ -1,0 +1,32 @@
+# ============================================================================
+# Quadruped Terrain Traversability Analysis Parameters
+# ============================================================================
+
+terrain:
+  # ---- 2.5D Elevation Grid ----
+  grid_resolution: 0.05                    # [m] cell size
+  grid_length: 100.0                       # [m] total grid side length
+  max_range: 30.0                          # [m] maximum LiDAR range for terrain
+  min_range: 0.3                           # [m] minimum range (self-filter from robot body)
+
+  # ---- Slope Analysis (PCA) ----
+  normal_estimation_radius: 0.2            # [m] neighbourhood radius for PCA
+  max_climb_angle: 0.5236                  # [rad] = 30° — steeper → untraversable
+  slope_weight: 1.0                        # cost weight
+
+  # ---- Roughness Analysis ----
+  roughness_threshold: 0.1                 # [m] σ_z — rougher → untraversable
+  roughness_weight: 0.8                    # cost weight
+
+  # ---- Step Height Detection ----
+  max_step_height: 0.20                    # [m] positive step — higher → untraversable
+  max_step_depth: 0.15                     # [m] negative step — deeper → untraversable
+  step_weight: 1.5                         # cost weight
+
+  # ---- Ray Visibility / Occlusion ----
+  enable_occlusion_check: true
+  occlusion_weight: 0.5                    # cost weight
+
+  # ---- Output ----
+  publish_costmap: true
+  costmap_topic: "/TERRAIN_TRAVERSABILITY_MAP"
