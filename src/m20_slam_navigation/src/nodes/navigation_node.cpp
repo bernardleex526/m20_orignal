@@ -82,7 +82,8 @@ public:
     lidar_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         "/LIDAR/pointcloud", rclcpp::SensorDataQoS(),
         [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
-          auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+          pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(
+            new pcl::PointCloud<pcl::PointXYZI>());
           pcl::fromROSMsg(*msg, *cloud);
 
           SE3Pose T_world_lidar = getCurrentPose();

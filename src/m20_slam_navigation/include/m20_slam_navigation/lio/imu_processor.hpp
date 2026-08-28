@@ -21,6 +21,7 @@
 
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace m20::lio {
@@ -58,6 +59,10 @@ public:
   /// Get buffered IMU data between two timestamps
   std::vector<ImuPacket> getMeasurementsBetween(const Timestamp& from, const Timestamp& to) const;
 
+  /// Get all buffered measurements no later than the requested timestamp.
+  /// Used by the vendor-compatible cumulative 200-sample initialization.
+  std::vector<ImuPacket> getMeasurementsUpTo(const Timestamp& to) const;
+
 private:
   /// Propagate state by one IMU step (mid-point integration on manifold)
   void propagateState(const ImuPacket& imu0, const ImuPacket& imu1,
@@ -68,6 +73,7 @@ private:
   SensorParams    sensor_params_;
   LIOParams       lio_params_;
   std::deque<ImuPacket> imu_buffer_;
+  mutable std::mutex imu_mutex_;
   static constexpr std::size_t kMaxBufferSize = 4096;
 };
 

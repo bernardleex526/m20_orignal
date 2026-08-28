@@ -10,6 +10,7 @@ ImuProcessor::ImuProcessor(const SensorParams& sensor_params, const LIOParams& l
     : sensor_params_(sensor_params), lio_params_(lio_params) {}
 
 void ImuProcessor::addMeasurement(const ImuPacket& imu) {
+  std::lock_guard<std::mutex> lock(imu_mutex_);
   if (imu_buffer_.size() >= kMaxBufferSize) {
     imu_buffer_.pop_front();
   }
@@ -27,13 +28,44 @@ ImuProcessor::IntegrationResult ImuProcessor::integrate(
   result.pose_end = pose_start;
   result.velocity_end = vel_start;
 
-  // Collect IMU measurements in [t_start, t_end]
+  // Collect the interval with samples pinned to both boundaries. The vendor
+  // IMU runs asynchronously from LiDAR, so exact scan timestamps rarely exist
+  // in the IMU stream; omitting the boundary slivers accumulates a timing gap
+  // on every scan.
   std::vector<ImuPacket> measurements;
   {
+    std::lock_guard<std::mutex> lock(imu_mutex_);
+    const ImuPacket* before = nullptr;
+    const ImuPacket* after = nullptr;
     for (const auto& m : imu_buffer_) {
-      if (m.stamp >= t_start && m.stamp <= t_end) {
+      if (m.stamp <= t_start) {
+        before = &m;
+      }
+      if (m.stamp > t_start && m.stamp < t_end) {
         measurements.push_back(m);
       }
+      if (m.stamp >= t_end) {
+        after = &m;
+        break;
+      }
+    }
+    if (before) {
+      ImuPacket boundary = *before;
+      boundary.stamp = t_start;
+      measurements.insert(measurements.begin(), boundary);
+    } else if (!measurements.empty()) {
+      ImuPacket boundary = measurements.front();
+      boundary.stamp = t_start;
+      measurements.insert(measurements.begin(), boundary);
+    }
+    if (after) {
+      ImuPacket boundary = *after;
+      boundary.stamp = t_end;
+      measurements.push_back(boundary);
+    } else if (!measurements.empty() && measurements.back().stamp < t_end) {
+      ImuPacket boundary = measurements.back();
+      boundary.stamp = t_end;
+      measurements.push_back(boundary);
     }
   }
 
@@ -90,12 +122,12 @@ void ImuProcessor::propagateState(
   pose.q = pose.q * dq;
   pose.q.normalize();
 
-  // Velocity update: v_k+1 = v_k + (R_k · a_mid + g_world) · dt
+  // Position must use the velocity at the beginning of the interval. Updating
+  // velocity first would count the acceleration term 1.5 times.
   Eigen::Matrix<Scalar, 3, 1> a_world = pose.q._transformVector(a_mid);
-  vel += (a_world + lio_params_.gravity) * dt;
-
-  // Position update: p_k+1 = p_k + v_k·dt + ½·(R_k·a_mid + g)·dt²
-  pose.t += vel * dt + 0.5 * (a_world + lio_params_.gravity) * dt * dt;
+  const Eigen::Matrix<Scalar, 3, 1> world_accel = a_world + lio_params_.gravity;
+  pose.t += vel * dt + 0.5 * world_accel * dt * dt;
+  vel += world_accel * dt;
 }
 
 Eigen::Quaternion<Scalar> ImuProcessor::estimateInitialAttitude(
@@ -121,10 +153,12 @@ Eigen::Quaternion<Scalar> ImuProcessor::estimateInitialAttitude(
   }
   avg_accel.normalize();
 
-  // Compute rotation that aligns body-frame gravity with world-frame [0, 0, -g]
+  // A stationary accelerometer measures specific force opposite gravity. With
+  // world gravity [0,0,-g], the measured vector must therefore align to +Z so
+  // R*a + gravity cancels during propagation.
   // Using the shortest-arc quaternion between two vectors
   Eigen::Matrix<Scalar, 3, 1> g_body = avg_accel;
-  Eigen::Matrix<Scalar, 3, 1> g_world(0, 0, -1);  // normalized gravity in world (z-up)
+  Eigen::Matrix<Scalar, 3, 1> g_world(0, 0, 1);
 
   // Rotation axis: cross product; angle: acos(dot)
   Eigen::Matrix<Scalar, 3, 1> axis = g_body.cross(g_world);
@@ -150,6 +184,7 @@ Eigen::Quaternion<Scalar> ImuProcessor::estimateInitialAttitude(
 std::vector<ImuPacket> ImuProcessor::getMeasurementsBetween(
     const Timestamp& from, const Timestamp& to) const {
   std::vector<ImuPacket> result;
+  std::lock_guard<std::mutex> lock(imu_mutex_);
   for (const auto& m : imu_buffer_) {
     if (m.stamp >= from && m.stamp <= to) {
       result.push_back(m);
@@ -158,7 +193,19 @@ std::vector<ImuPacket> ImuProcessor::getMeasurementsBetween(
   return result;
 }
 
+std::vector<ImuPacket> ImuProcessor::getMeasurementsUpTo(const Timestamp& to) const {
+  std::vector<ImuPacket> result;
+  std::lock_guard<std::mutex> lock(imu_mutex_);
+  result.reserve(imu_buffer_.size());
+  for (const auto& measurement : imu_buffer_) {
+    if (measurement.stamp > to) break;
+    result.push_back(measurement);
+  }
+  return result;
+}
+
 void ImuProcessor::reset() {
+  std::lock_guard<std::mutex> lock(imu_mutex_);
   imu_buffer_.clear();
 }
 

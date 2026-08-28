@@ -124,7 +124,7 @@ private:
   gtsam::Values                      initial_values_;
   gtsam::ISAM2                       isam2_;
   gtsam::Values                      result_;
-  std::mutex                         mutex_;
+  mutable std::mutex                 mutex_;
   bool                               graph_modified_{false};
 };
 

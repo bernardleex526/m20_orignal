@@ -45,6 +45,13 @@ public:
   void addPriorPose(FrameId frame_id, const SE3Pose& pose,
                     const Eigen::Matrix<Scalar, 6, 6>& covariance);
 
+  /// Add the IMU gravity-direction factor for a keyframe.
+  void addGravityFactor(FrameId frame_id,
+                        const Eigen::Matrix<Scalar, 3, 1>& gravity_body);
+
+  /// Queue a geometrically verified loop candidate for the next optimize().
+  void addLoopClosure(const LoopCandidate& candidate);
+
   /// Run optimization (called periodically or on new data)
   void optimize();
 
@@ -72,6 +79,7 @@ private:
 
   mutable std::mutex                    mutex_;
   std::vector<LoopCandidate>            pending_loops_;
+  std::size_t                            keyframe_counter_{0};
 };
 
 }  // namespace m20::backend

@@ -32,31 +32,54 @@ struct SensorParams {
   Scalar imu_accel_bias_rw{0.0002};   ///< accel bias random walk [m/s³/√Hz]
   Scalar imu_gyro_bias_rw{0.000003};  ///< gyro bias random walk [rad/s²/√Hz]
 
-  // Extrinsics: T_lidar_imu (LiDAR frame in IMU frame)
-  SE3Pose T_lidar_imu;
+  // Vendor extrinsics use T_B_I and T_B_L.  The transform consumed by the
+  // LIO state/deskewer is T_I_L = inverse(T_B_I) * T_B_L.
+  SE3Pose T_body_imu;
+  SE3Pose T_body_lidar;
+  SE3Pose T_lidar_imu;  ///< derived LiDAR-in-IMU transform, never loaded directly
 
   // Foot odometry
   Scalar odom_hz{100.0};
   Scalar odom_slip_ratio{0.02};       ///< expected slip ratio on normal terrain
 };
 
+inline SE3Pose composeVendorLidarInImuExtrinsic(
+    const SE3Pose& T_body_imu, const SE3Pose& T_body_lidar) {
+  return T_body_imu.inverse() * T_body_lidar;
+}
+
 // =============================================================================
-// LIO Front-End parameters (VGICP)
+// LIO Front-End parameters.  Names and defaults mirror the M20Pro dr_lio
+// 3.4.0 configuration where the vendor contract is public.
 // =============================================================================
 struct LIOParams {
-  Scalar voxel_size{0.5};             ///< [m] voxel resolution
+  Scalar voxel_size{0.16};            ///< [m] vendor level-2 map resolution
+  bool   enable_downsample{true};
+  Scalar downsample_leaf_size{0.15};  ///< vendor leaf_size [m]
+  Scalar leaf_size_body{0.05};        ///< vendor body/output cloud leaf size [m]
+  int    point_stride{5};             ///< vendor skip_num
+  int    max_lidar_queue_size{3};     ///< bound latency by discarding stale scans
   int    max_voxels{100000};           ///< max voxels in map
-  Scalar keyframe_distance{0.5};      ///< [m] min translation to insert keyframe
-  Scalar keyframe_angle{0.2};         ///< [rad] min rotation to insert keyframe
+  Scalar keyframe_distance{0.8};      ///< [m] native office-bag spacing is about 0.8 m
+  Scalar keyframe_angle{0.4};         ///< [rad] native turn keyframes appear near 0.4 rad
 
-  // VGICP registration
-  int   max_iterations{30};
-  Scalar convergence_threshold{1e-3}; ///< relative state change tolerance
-  Scalar correspondence_radius{1.0};  ///< [m] max correspondence distance
-  int   num_threads{4};               ///< OpenMP threads for VGICP
+  // Vendor iterated point-to-plane ESKF observation model
+  int   max_iterations{3};
+  Scalar esti_plane_threshold{0.1};   ///< [m] maximum accepted point-plane residual
+  Scalar lidar_cov{0.001};            ///< scalar LiDAR observation covariance
+  int deepest_level{2};
+  int plane_level{2};
+  int top_level{1};
+  bool extrinsic_est_en{false};
 
   // IMU integration
   Scalar imu_integration_dt{0.005};   ///< [s] integration time step
+  Scalar init_time{0.1};              ///< [s] stationary IMU initialization window
+  int imu_init_samples{200};          ///< vendor MAX_INI_COUNT
+  Scalar acc_cov{0.5};
+  Scalar gyr_cov{0.5};
+  Scalar b_acc_cov{0.001};
+  Scalar b_gyr_cov{0.001};
 
   // Gravity alignment
   Eigen::Matrix<Scalar, 3, 1> gravity{0.0, 0.0, -9.81007};
@@ -71,6 +94,29 @@ struct BackendParams {
   Scalar gravity_noise_sigma{0.01};           ///< gravity factor noise [m/s²]
   Scalar loop_closure_noise_trans{0.5};
   Scalar loop_closure_noise_rot{0.1};
+  Scalar loop_matching_error_threshold{0.16};
+  Scalar loop_inlier_fraction_threshold{0.95};
+  Scalar loop_max_search_distance{8.0};
+  Scalar loop_min_submap_overlap{0.65};
+  Scalar loop_icp_max_correspondence{2.0};
+  int    loop_submap_radius{3};
+  int    loop_max_candidates{8};
+  int    loop_min_frame_separation{250};
+  int    loop_detection_stride{5};
+  bool   enable_loop_closure{false};
+
+  // Native PGO noise vectors use Pose3 tangent ordering [rx, ry, rz, tx, ty, tz].
+  // Keep the vectors intact instead of collapsing them to one isotropic sigma.
+  std::array<Scalar, 6> prior_noise_sigmas{{1.0e6, 1.0e4, 0.001, 0.01, 0.01, 0.01}};
+  std::array<Scalar, 6> odom_noise_sigmas{{0.01, 0.01, 0.01, 0.01, 0.01, 0.01}};
+  std::array<Scalar, 6> loop_noise_sigmas{{0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001}};
+  std::array<Scalar, 6> prior_noise_default_sigmas{{1.0e-6, 1.0e-6, 1.0e-6, 1.0e-7, 1.0e-7, 1.0e-7}};
+  std::array<Scalar, 3> gps_noise_precision{{1.0, 1.0, 0.2}};
+  bool enable_imu_gravity{true};
+  std::array<Scalar, 3> imu_gravity_noise{{0.1, 0.1, 0.1}};
+  Scalar distance_threshold_factor{0.03};
+  int segment_num{15};
+  Scalar keyframe_time{60.0};
 
   // Degeneracy detection
   Scalar degeneracy_threshold{10.0};          ///< λ_min/λ_max < 1/threshold if degenerate
@@ -99,7 +145,7 @@ struct LocalizationParams {
   // Multi-hypothesis relocalization
   int    num_hypotheses{8};                   ///< number of initial pose hypotheses
   Scalar hypothesis_trans_range{5.0};         ///< [m]
-  Scalar hypothesis_rot_range{kPI};           ///< [rad] full 360°
+  Scalar hypothesis_rot_range{3.14159265358979323846}; ///< [rad] full 360°
 
   // ESKF
   Scalar eskf_accel_noise{0.1};               ///< process noise accel
@@ -120,7 +166,7 @@ struct TerrainParams {
   Scalar min_range{0.3};                      ///< [m] min range (self-filter)
 
   // Slope
-  Scalar max_climb_angle{30.0 * kPI / 180.0}; ///< [rad] ≈ 30°
+  Scalar max_climb_angle{0.5235987755982988}; ///< [rad] ≈ 30°
   Scalar slope_weight{1.0};
 
   // Roughness

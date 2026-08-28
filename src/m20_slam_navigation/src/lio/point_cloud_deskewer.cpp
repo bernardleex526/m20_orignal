@@ -10,10 +10,12 @@ PointCloudDeskewer::PointCloudDeskewer(const SE3Pose& T_lidar_imu)
 
 pcl::PointCloud<pcl::PointXYZI>::Ptr PointCloudDeskewer::deskew(
     const pcl::PointCloud<pcl::PointXYZI>::Ptr& raw_cloud,
+    const std::vector<double>& point_time_offsets,
     const std::vector<std::pair<Timestamp, SE3Pose>>& trajectory,
     const Timestamp& scan_start) {
 
-  auto deskewed = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+  pcl::PointCloud<pcl::PointXYZI>::Ptr deskewed(
+      new pcl::PointCloud<pcl::PointXYZI>());
   deskewed->reserve(raw_cloud->size());
   deskewed->header = raw_cloud->header;
 
@@ -26,9 +28,11 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr PointCloudDeskewer::deskew(
   // Get scan end time from trajectory
   Timestamp scan_end = trajectory.back().first;
 
-  for (const auto& point : raw_cloud->points) {
-    // Per-point timestamp: stored in intensity field as time offset [s] from scan start
-    Scalar time_offset_s = point.intensity;
+  for (std::size_t index = 0; index < raw_cloud->points.size(); ++index) {
+    const auto& point = raw_cloud->points[index];
+    const Scalar time_offset_s = index < point_time_offsets.size()
+      ? point_time_offsets[index]
+      : Scalar(0.0);
     auto pt_stamp = scan_start + std::chrono::nanoseconds(
         static_cast<int64_t>(time_offset_s * 1e9));
 
@@ -39,9 +43,12 @@ pcl::PointCloud<pcl::PointXYZI>::Ptr PointCloudDeskewer::deskew(
     // Interpolate pose at point timestamp
     SE3Pose T_i = interpolatePose(trajectory, pt_stamp);
 
-    // Relative motion from point time to scan start: ΔT = T_start⁻¹ ∘ T_i
-    const SE3Pose& T_start = trajectory.front().second;
-    SE3Pose delta_T = T_start.inverse() * T_i;
+    // Vendor ImuProcess::UndistortPcl compensates every point into the scan-end
+    // frame, because the ESKF state after Process() is associated with the
+    // LiDAR end timestamp.  Keeping a scan-start cloud with a scan-end state
+    // creates a systematic timing/translation mismatch during motion.
+    const SE3Pose& T_end = trajectory.back().second;
+    SE3Pose delta_T = T_end.inverse() * T_i;
 
     // Transform point: p_corrected = T_lidar_imu⁻¹ · ΔT · T_lidar_imu · p_raw
     Eigen::Matrix<Scalar, 3, 1> p_raw(point.x, point.y, point.z);

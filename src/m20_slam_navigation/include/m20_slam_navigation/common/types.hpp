@@ -109,8 +109,11 @@ struct alignas(32) ImuPacket {
 // LiDAR scan descriptor for a single ring/scans
 // =============================================================================
 struct LiDARPacket {
-  Timestamp stamp;
+  Timestamp stamp;       ///< scan start
+  Timestamp scan_end;    ///< scan end from per-point timestamps
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud;  ///< raw (possibly distorted) point cloud
+  std::vector<double> point_time_offsets;       ///< seconds from scan start, one per point
+  std::vector<std::uint16_t> rings;             ///< vendor ring, one per point
   FrameId frame_id{INVALID_FRAME_ID};
 };
 
@@ -143,10 +146,14 @@ struct VoxelEntry {
 
   Eigen::Matrix<Scalar, 3, 1> centroid{Eigen::Matrix<Scalar, 3, 1>::Zero()};   ///< μ
   Eigen::Matrix<Scalar, 3, 3> covariance{Eigen::Matrix<Scalar, 3, 3>::Zero()}; ///< Σ
+  Eigen::Matrix<Scalar, 3, 1> plane_normal{Eigen::Matrix<Scalar, 3, 1>::Zero()};
+  Scalar                      plane_offset{0.0};
   uint32_t                    point_count{0};
+  bool                        plane_valid{false};
 
   /// Online update: add point p to Gaussian distribution (Welford-like)
   void addPoint(const Eigen::Matrix<Scalar, 3, 1>& p);
+  void updatePlane(Scalar eigenvalue_ratio = 0.1);
 };
 
 // =============================================================================
@@ -206,7 +213,7 @@ struct ESKFState {
   Eigen::Matrix<Scalar, 15, 15>   P{Eigen::Matrix<Scalar, 15, 15>::Identity()};
 
   /// Gravity vector in world frame (z-up convention)
-  static constexpr Eigen::Matrix<Scalar, 3, 1> GRAVITY{0.0, 0.0, -9.81007};
+  inline static const Eigen::Matrix<Scalar, 3, 1> GRAVITY{0.0, 0.0, -9.81007};
 };
 
 // =============================================================================

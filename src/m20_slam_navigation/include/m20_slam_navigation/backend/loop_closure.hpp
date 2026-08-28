@@ -39,6 +39,7 @@ struct ScanContextDescriptor {
   Eigen::Matrix<Scalar, 1, kNumRings>           ring_key;  ///< for fast candidate search
   FrameId                                        frame_id;
   SE3Pose                                        pose;
+  pcl::PointCloud<pcl::PointXYZI>::Ptr           cloud;
 
   /// Compute cosine distance to another descriptor, searching best column alignment
   Scalar distance(const ScanContextDescriptor& other) const;
@@ -78,10 +79,6 @@ private:
   BackendParams                               params_;
   std::deque<ScanContextDescriptor>           database_;
   static constexpr std::size_t kMaxDatabase  = 1000;
-  static constexpr Scalar kRingKeyThreshold  = 0.3;
-  static constexpr Scalar kScanContextThreshold = 0.25;
-  static constexpr int kNumCandidates        = 3;
-  static constexpr Scalar kRadiusSearch      = 15.0;  ///< [m] radius for geometric verification
 };
 
 }  // namespace m20::backend

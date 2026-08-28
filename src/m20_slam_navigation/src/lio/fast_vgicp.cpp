@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -29,10 +30,16 @@ VGICPResult FastVAGICP::align(
   SE3Pose T = T_init;
   Scalar prev_cost = 1e9;
   Scalar lambda = 1e-3;  // LM damping factor (initial)
+  Eigen::Matrix<Scalar, 6, 6> final_hessian =
+    Eigen::Matrix<Scalar, 6, 6>::Identity() * Scalar(1e-6);
+  int completed_iterations = 0;
+  Scalar last_update_norm = std::numeric_limits<Scalar>::infinity();
 
   for (int iter = 0; iter < params_.max_iterations; ++iter) {
+    completed_iterations = iter + 1;
     // Transform source to world frame using current T
-    auto source_transformed = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+    pcl::PointCloud<pcl::PointXYZI>::Ptr source_transformed(
+        new pcl::PointCloud<pcl::PointXYZI>());
     source_transformed->reserve(source->size());
     for (const auto& pt : source->points) {
       Eigen::Matrix<Scalar, 3, 1> p(pt.x, pt.y, pt.z);
@@ -46,6 +53,7 @@ VGICPResult FastVAGICP::align(
     // Find correspondences
     auto correspondences = voxel_map->findCorrespondences(
         source_transformed, params_.correspondence_radius);
+    result.correspondences = static_cast<int>(correspondences.size());
 
     if (correspondences.size() < 10) {
       result.converged = false;
@@ -77,7 +85,7 @@ VGICPResult FastVAGICP::align(
     for (int i = 0; i < n_corr; ++i) {
 #endif
       const auto& [src_idx, voxel_ptr] = correspondences[i];
-      const auto& pt = source_transformed->points[src_idx];
+      const auto& pt = source->points[src_idx];
       Eigen::Matrix<Scalar, 3, 1> p(pt.x, pt.y, pt.z);
 
       // Compute Jacobian (3×6), residual (3×1), and weight matrix (3×3)
@@ -118,10 +126,13 @@ VGICPResult FastVAGICP::align(
 
     total_cost /= static_cast<Scalar>(correspondences.size());
     result.fitness = static_cast<double>(total_cost);
+    final_hessian = H;
 
     // Check convergence
-    Scalar cost_change = std::abs(total_cost - prev_cost) / (prev_cost + 1e-6);
-    if (cost_change < params_.convergence_threshold && iter > 3) {
+    const Scalar signed_cost_change = total_cost - prev_cost;
+    const Scalar relative_cost_change =
+      std::abs(signed_cost_change) / (std::abs(prev_cost) + 1e-6);
+    if (relative_cost_change < params_.convergence_threshold && iter > 3) {
       result.converged = true;
       break;
     }
@@ -136,13 +147,14 @@ VGICPResult FastVAGICP::align(
 
     if (solver.info() == Eigen::Success) {
       delta_xi = solver.solve(-b);
+      last_update_norm = delta_xi.norm();
 
-      // Update: T ← T ∘ exp(δξ)
+      // The Jacobian below is a left perturbation Jacobian.
       SE3Pose dT = SE3Pose::exp(delta_xi);
-      T = T * dT;
+      T = dT * T;
 
       // Adjust damping (Levenberg-Marquardt style)
-      if (cost_change < 0) {
+      if (signed_cost_change < 0) {
         lambda *= 0.5;  // cost decreased: reduce damping
       } else {
         lambda *= 2.0;  // cost increased: increase damping
@@ -155,10 +167,15 @@ VGICPResult FastVAGICP::align(
     }
   }
 
-  result.iterations = (result.converged ? params_.max_iterations_ / 2 : params_.max_iterations_);
+  if (!result.converged && completed_iterations >= 5 && std::isfinite(result.fitness) &&
+      std::isfinite(last_update_norm) && last_update_norm < Scalar(0.05)) {
+    result.converged = true;
+  }
+  result.iterations = completed_iterations;
+  result.final_update_norm = static_cast<double>(last_update_norm);
   result.T_world_lidar = T;
   // Information matrix = H at convergence
-  result.information = H;
+  result.information = final_hessian;
 
   auto t_end = std::chrono::steady_clock::now();
   result.elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
@@ -181,9 +198,9 @@ void FastVAGICP::computeJacobianAndResidual(
   // Jacobian of transformed point w.r.t. se(3) twist:
   // ∂(R·p + t)/∂ξ = [ −[R·p]×  |  I₃ ]
   Eigen::Matrix<Scalar, 3, 3> R = T.q.toRotationMatrix();
-  Eigen::Matrix<Scalar, 3, 1> Rp = R * source_point;
+  (void)R;
 
-  J_i.template block<3, 3>(0, 0) = -math::skew(Rp);   // −[R·p]×
+  J_i.template block<3, 3>(0, 0) = -math::skew(p_transformed);
   J_i.template block<3, 3>(0, 3) = Eigen::Matrix<Scalar, 3, 3>::Identity();  // I₃
 
   // Weight matrix: C = R·σ²·I·Rᵀ + Σ_target

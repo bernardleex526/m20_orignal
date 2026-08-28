@@ -11,7 +11,7 @@ PriorMapLoader::PriorMapLoader(const LocalizationParams& params)
     : params_(params) {}
 
 bool PriorMapLoader::loadMap(const std::string& map_path) {
-  full_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  full_map_.reset(new pcl::PointCloud<pcl::PointXYZ>());
 
   if (pcl::io::loadPCDFile<pcl::PointXYZ>(map_path, *full_map_) == -1) {
     loaded_ = false;
@@ -19,7 +19,7 @@ bool PriorMapLoader::loadMap(const std::string& map_path) {
   }
 
   // Downsample for efficient NDT matching
-  downsampled_map_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  downsampled_map_.reset(new pcl::PointCloud<pcl::PointXYZ>());
   pcl::VoxelGrid<pcl::PointXYZ> vg;
   vg.setLeafSize(params_.map_voxel_leaf_size,
                  params_.map_voxel_leaf_size,

@@ -1,5 +1,7 @@
 #include "m20_slam_navigation/common/params.hpp"
 
+#include <Eigen/Eigenvalues>
+
 namespace m20 {
 
 // Default construction provides compile-time constants.
@@ -7,6 +9,7 @@ namespace m20 {
 // using rclcpp parameter callbacks or external YAML parsing.
 
 void VoxelEntry::addPoint(const Eigen::Matrix<Scalar, 3, 1>& p) {
+  plane_valid = false;
   // Welford's online algorithm for incremental mean and covariance
   point_count++;
   Scalar n = static_cast<Scalar>(point_count);
@@ -21,6 +24,22 @@ void VoxelEntry::addPoint(const Eigen::Matrix<Scalar, 3, 1>& p) {
     covariance += delta * delta2.transpose();
     // Note: covariance becomes Σ = accumulated / (n − 1) when queried
   }
+}
+
+void VoxelEntry::updatePlane(Scalar eigenvalue_ratio) {
+  plane_valid = false;
+  if (point_count < 5U) return;
+  const auto normalized_covariance = covariance / static_cast<Scalar>(point_count - 1U);
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix<Scalar, 3, 3>> solver(normalized_covariance);
+  if (solver.info() != Eigen::Success) return;
+  const auto eigenvalues = solver.eigenvalues();
+  if (!eigenvalues.allFinite() || eigenvalues.z() <= Scalar(1e-10) ||
+      eigenvalues.x() > eigenvalue_ratio * eigenvalues.y()) {
+    return;
+  }
+  plane_normal = solver.eigenvectors().col(0);
+  plane_offset = -plane_normal.dot(centroid);
+  plane_valid = true;
 }
 
 void ElevationCell::update(Scalar z) {

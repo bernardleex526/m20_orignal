@@ -41,6 +41,8 @@ struct VGICPResult {
   Eigen::Matrix<Scalar, 6, 6>      information;         ///< Hessian (JᵀWJ) at convergence
   double                           fitness;             ///< final cost / N
   int                              iterations;          ///< iterations taken
+  int                              correspondences{0};
+  double                           final_update_norm{0.0};
   bool                             converged;
   double                           elapsed_ms;          ///< wall-clock time
 };

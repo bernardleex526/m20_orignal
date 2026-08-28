@@ -6,7 +6,8 @@
   <description>
     Industrial-grade 3D LiDAR-Inertial SLAM, Relocalization, Terrain Traversability
     Analysis, and Autonomous Navigation system for quadruped robots (M20 Pro).
-    Modules: LIO Frontend (FastVAGICP), Backend (GTSAM iSAM2 + Gravity + PGO),
+    Modules: LIO Frontend (iterated ESKF + hierarchical voxel point-plane update),
+    Backend (GTSAM iSAM2 + Gravity + PGO),
     Prior Map Relocalization (NDT + ESKF), Terrain Analysis (2.5D Elevation Grid),
     Global Planner (Omnidirectional Hybrid A*), Local Controller (DWA + LinePlanner).
   </description>
@@ -18,6 +19,7 @@
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
   <depend>rclcpp_lifecycle</depend>
+  <depend>lifecycle_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
@@ -33,6 +35,10 @@
   <depend>eigen3_cmake_module</depend>
   <depend>libpcl-all-dev</depend>
   <depend>gtsam</depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

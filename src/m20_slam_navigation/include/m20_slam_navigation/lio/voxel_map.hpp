@@ -1,11 +1,11 @@
 #pragma once
 /**
  * @file voxel_map.hpp
- * @brief Hash-based incremental 3D voxel grid for VGICP.
+ * @brief Hierarchical incremental voxel-plane map for the vendor-style LIO.
  *
- * Uses spatial hashing for O(1) voxel access. Each voxel stores a Gaussian
- * distribution (centroid μ, covariance Σ) updated incrementally via Welford's
- * online algorithm.
+ * Each level uses spatial hashing and stores an online centroid/covariance.
+ * Point-to-plane observations probe the configured plane level first and then
+ * coarser levels, matching the public dr_lio voxel-block-map contract.
  *
  * The hash function maps 3D integer voxel coordinates to a flat bucket index:
  *   hash(ix, iy, iz) = (ix * P1) ^ (iy * P2) ^ (iz * P3)  mod N
@@ -20,6 +20,7 @@
 #include <Eigen/Dense>
 
 #include <memory>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -52,6 +53,16 @@ public:
   /// @param voxel_size  Edge length of each voxel [m]
   /// @param max_voxels  Max number of voxels before pruning
   explicit VoxelMap(Scalar voxel_size = 0.5, int max_voxels = 100000);
+  explicit VoxelMap(const LIOParams& params);
+
+  struct PlaneMatch {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    Eigen::Matrix<Scalar, 3, 1> normal{Eigen::Matrix<Scalar, 3, 1>::Zero()};
+    Scalar offset{0.0};
+    Scalar residual{0.0};
+    int level{-1};
+    std::uint32_t support_points{0};
+  };
 
   /**
    * @brief Insert a point cloud into the voxel map.
@@ -79,6 +90,17 @@ public:
       const pcl::PointCloud<pcl::PointXYZI>::Ptr& source,
       Scalar radius) const;
 
+  /// Find a locally planar voxel correspondence for a world-frame point.
+  bool findPlane(const Eigen::Matrix<Scalar, 3, 1>& point, PlaneMatch& match) const;
+
+  /// Batch form used by each iterated ESKF observation pass. It probes the
+  /// native seven-cell stencil (center plus six face neighbours), holds one
+  /// shared map lock, and reuses the plane already cached in each voxel entry.
+  void findPlanes(
+    const std::vector<Eigen::Matrix<Scalar, 3, 1>>& points,
+    std::vector<PlaneMatch>& matches,
+    std::vector<std::uint8_t>& valid) const;
+
   /// Get voxel at a 3D point (returns nullptr if not occupied)
   const VoxelEntry* getVoxel(const Eigen::Matrix<Scalar, 3, 1>& point) const;
 
@@ -92,20 +114,30 @@ public:
   void clear();
 
   /// Number of occupied voxels
-  std::size_t size() const { return voxels_.size(); }
+  std::size_t size() const;
 
   /// Voxel resolution
   Scalar resolution() const { return voxel_size_; }
+  int deepestLevel() const { return deepest_level_; }
 
 private:
-  VoxelKey pointToKey(const Eigen::Matrix<Scalar, 3, 1>& p) const;
-  Eigen::Matrix<Scalar, 3, 1> keyToCenter(const VoxelKey& key) const;
+  VoxelKey pointToKey(const Eigen::Matrix<Scalar, 3, 1>& p, int level) const;
+  Eigen::Matrix<Scalar, 3, 1> keyToCenter(const VoxelKey& key, int level) const;
+  void pruneUnlocked();
 
   Scalar voxel_size_;
-  Scalar voxel_inv_;
   int    max_voxels_;
+  Scalar plane_threshold_{0.1};
+  int deepest_level_{0};
+  int plane_level_{0};
+  int top_level_{0};
+  Eigen::Matrix<Scalar, 3, 1> local_center_{Eigen::Matrix<Scalar, 3, 1>::Zero()};
+  Scalar local_radius_{60.0};
 
-  std::unordered_map<VoxelKey, VoxelEntry, VoxelKeyHash> voxels_;
+  using LevelMap = std::unordered_map<VoxelKey, VoxelEntry, VoxelKeyHash>;
+  std::vector<Scalar> level_resolution_;
+  std::vector<LevelMap> voxels_by_level_;
+  mutable std::shared_mutex mutex_;
 };
 
 }  // namespace m20::lio

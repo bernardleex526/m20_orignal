@@ -17,14 +17,13 @@
 #include <Eigen/SVD>
 
 #include <cmath>
-#include <numbers>
 
 namespace m20::math {
 
 // =============================================================================
 // Constants
 // =============================================================================
-inline constexpr Scalar kPI   = std::numbers::pi_v<Scalar>;
+inline constexpr Scalar kPI   = 3.14159265358979323846;
 inline constexpr Scalar k2PI  = 2.0 * kPI;
 inline constexpr Scalar kDeg2Rad = kPI / 180.0;
 inline constexpr Scalar kRad2Deg = 180.0 / kPI;

@@ -1,0 +1,168 @@
+slam_node:
+  ros__parameters:
+    # M20 Pro official ROS 2 / DDS interfaces.
+    lidar_topic: /LIDAR/POINTS
+    # Read the already fused front/rear cloud directly from the vendor DrDDS bus.
+    lidar_transport: drdds
+    imu_topic: /IMU
+    imu_transport: drdds
+    drdds.domain_id: 0
+    drdds.use_shm: true
+    drdds.topic_prefix: rt
+    drdds.network_name: eth0/eth1
+    drdds.socket_path: /tmp/m20_drdds_lidar.sock
+    drdds.imu_socket_path: /tmp/m20_drdds_imu.sock
+
+    # Vendor channel semantics with an isolation prefix.  Remove /m20_slam
+    # only when the native mapping service is stopped and exact names are
+    # intentionally required.
+    output_odom_topic: /m20_slam/SLAM_ODOM
+    output_aligned_cloud_topic: /m20_slam/SLAM_ALIGNED_POINTS
+    # The vendor binary publishes this additional body-frame channel even
+    # though it is not listed in node.output_* in params.yaml.
+    output_body_cloud_topic: /m20_slam/SLAM_CLOUD_REGISTERED_BODY
+    output_voxel_cloud_topic: /m20_slam/DEPTH_POINTS
+    output_depth_image_topic: /m20_slam/DEPTH_IMAGE
+    output_accumulated_map_cloud_topic: /m20_slam/SLAM_ACCUMULATED_POINTS_MAP
+    # Set true only for an A/B run after the native publisher is stopped.
+    use_vendor_topic_names: false
+    lidar_type: 1
+    lidar_use_system_time: false
+    imu_use_system_time: false
+    path_output_topic: /m20_slam/path
+    map_frame: m20_slam_map
+    tracking_frame: m20_slam_lidar
+    body_frame: base_link
+    publish_tf: true
+
+    map_save_path: maps/m20_map/full_cloud.pcd
+    auto_save_on_shutdown: true
+    checkpoint_save_period_s: 10.0
+    publish_map_every_n_keyframes: 5
+    max_timestamp_rollback_ms: 20
+
+    sensors.lidar_scan_lines: 96
+    sensors.lidar_min_range: 0.2
+    sensors.lidar_max_range: 60.0
+    sensors.lidar_hz: 10.0
+    sensors.imu_hz: 200.0
+    sensors.odom_hz: 10.0
+    # dr_lio 3.4.0 visible parameter contract.
+    # Native composition confirmed from the ARM64 binary:
+    # T_I_L = inverse(T_B_I) * T_B_L.
+    lio.extrinsic_B_I: [1.0, 0.0, 0.0, 0.0,
+                        0.0, 1.0, 0.0, 0.0,
+                        0.0, 0.0, 1.0, 0.0,
+                        0.0, 0.0, 0.0, 1.0]
+    lio.extrinsic_B_L: [1.0, 0.0, 0.0, 0.0,
+                        0.0, 1.0, 0.0, 0.0,
+                        0.0, 0.0, 1.0, 0.0,
+                        0.0, 0.0, 0.0, 1.0]
+    # Native local_map levels are fixed at 0.64/0.32/0.16 m for levels 0/1/2.
+    lio.voxel_size: 0.16
+    lio.enable_downsample: true
+    lio.leaf_size: 0.15
+    lio.leaf_size_body: 0.05
+    lio.skip_num: 5
+    # Bound latency on NOS: stale scans are less useful than current pairs.
+    lio.max_lidar_queue_size: 3
+    lio.max_voxels: 500000
+    # The native office bag emits 49 saved keyframes. Its consecutive poses
+    # show translation triggers near 0.8 m and turn triggers near 0.4 rad.
+    lio.keyframe_distance: 0.8
+    lio.keyframe_angle: 0.4
+    lio.max_iteration: 3
+    lio.esti_plane_threshold: 0.1
+    lio.lidar_cov: 0.001
+    lio.deepest_level: 2
+    lio.plane_level: 2
+    lio.top_level: 1
+    lio.extrinsic_est_en: false
+    lio.init_time: 0.1
+    # dr_lio::MAX_INI_COUNT; at 200 Hz this is about one second of samples.
+    lio.imu_init_samples: 200
+    lio.acc_cov: 0.5
+    lio.gyr_cov: 0.5
+    lio.b_acc_cov: 0.001
+    lio.b_gyr_cov: 0.001
+    lio.save_full_pcd: false
+    # Isolated equivalent of the native /var/opt/robot/data/maps/active path.
+    lio.full_map_save_path: maps/m20_map/full_cloud.pcd
+
+    # Vendor accumulated_points contract. The native configuration disables
+    # this callback by default; when enabled it publishes a robot-local crop in
+    # base_link, not the global voxel-debug cloud.
+    accumulated_points.enable: false
+    accumulated_points.level: 3
+    accumulated_points.area_min: [-5.0, -5.0, -1.0]
+    accumulated_points.area_max: [5.0, 5.0, 1.0]
+    accumulated_points.udp_output.enable: false
+    accumulated_points.udp_output.resolution: 0.1
+    accumulated_points.udp_output.port: 30100
+
+    voxel_map.ray_casting: false
+    voxel_map.ray_casting_level: 3
+    voxel_map.ray_casting_range: 3.0
+    voxel_map.ray_dis_th: 0.02
+    voxel_map.depth_image.enable: false
+    voxel_map.depth_image.level: 4
+    voxel_map.depth_image.interpolation: true
+    voxel_map.depth_image.output.frequency: 20
+    voxel_map.depth_image.output.max_depth: 3.0
+    voxel_map.depth_image.output.normalize: true
+    voxel_map.depth_image.output.horizontal_resolution: 4.0
+    voxel_map.depth_image.output.vertical_resolution: 4.0
+    voxel_map.depth_image.output.body_height: 0.4
+
+    height_map.enable: false
+    height_map.level: 4
+    height_map.output.image_topic: /m20_slam/HEIGHT_IMAGE
+    height_map.output.cloud_topic: /m20_slam/HEIGHT_POINTS
+    height_map.output.frequency: 20
+    height_map.output.resolution: 0.04
+    height_map.output.size_x: 100
+    height_map.output.size_y: 100
+    height_map.output.min_z: -1.0
+    height_map.output.max_z: 1.0
+    height_map.output.body_height: 0.4
+
+    occ_grid_2d.output_prefix: occ_grid
+    occ_grid_2d.min_height: -0.2
+    occ_grid_2d.max_height: 0.4
+    occ_grid_2d.resolution: 0.1
+    occ_grid_2d.min_range: 0.2
+    occ_grid_2d.max_range: 30.0
+    occ_grid_2d.angle_increment: 0.006
+    occ_grid_2d.max_level: 8
+
+    pgo.prior_noise_sigmas: [1.0e6, 1.0e4, 0.001, 0.01, 0.01, 0.01]
+    pgo.odom_noise_sigmas: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+    pgo.loop_noise_sigmas: [0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001]
+    pgo.prior_noise_default_sigmas: [0.000001, 0.000001, 0.000001,
+                                      0.0000001, 0.0000001, 0.0000001]
+    pgo.gps_noise_precision: [1.0, 1.0, 0.2]
+    pgo.enable_imu_gravity: true
+    pgo.imu_gravity_noise: [0.1, 0.1, 0.1]
+    pgo.distance_threshold_factor: 0.03
+    pgo.segment_num: 15
+    pgo.matching_error_threshold: 0.16
+    pgo.inlier_fraction_threshold: 0.95
+    pgo.max_search_distance: 8.0
+    pgo.keyframe_time: 60.0
+
+    # Descriptor candidates are accepted only after ICP fitness and overlap
+    # verification. The resulting transform is converted to GTSAM's
+    # Between(source, target) convention before insertion.
+    backend.enable_loop_closure: true
+    # Reconstructed GHT verification operates on local submaps. The vendor
+    # 0.95 inlier fraction belongs to its private segment matcher and is not a
+    # point-wise ICP overlap ratio, so keep a separate explicit acceptance
+    # threshold for the reconstructed verifier.
+    backend.loop_min_submap_overlap: 0.65
+    backend.loop_icp_max_correspondence: 2.0
+    backend.loop_submap_radius: 3
+    backend.loop_max_candidates: 8
+    backend.loop_min_frame_separation: 250
+    backend.loop_detection_stride: 5
+    backend.enable_degeneracy_fallback: true
+    backend.degeneracy_threshold: 10.0

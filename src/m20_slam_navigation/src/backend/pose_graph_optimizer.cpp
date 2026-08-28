@@ -40,9 +40,22 @@ void PoseGraphOptimizer::addKeyframe(
 
   std::lock_guard<std::mutex> lock(mutex_);
 
+  if (!params_.enable_loop_closure) {
+    return;
+  }
+
   // Build ScanContext descriptor and add to database
   auto desc = LoopClosureDetector::buildDescriptor(cloud, frame_id, pose);
   loop_detector_->addKeyframe(desc);
+
+  // Geometric verification is intentionally low-frequency. Descriptor
+  // insertion remains per-keyframe, while ICP/GHT runs every Nth keyframe so
+  // the LIO thread can keep up with the complete offline bag.
+  ++keyframe_counter_;
+  if (params_.loop_detection_stride > 1 &&
+      (keyframe_counter_ % static_cast<std::size_t>(params_.loop_detection_stride)) != 0U) {
+    return;
+  }
 
   // Check for loop closures
   auto loops = loop_detector_->detectLoop(desc);
@@ -60,6 +73,22 @@ void PoseGraphOptimizer::addPriorPose(
 
   std::lock_guard<std::mutex> lock(mutex_);
   factor_graph_->addPriorFactor(frame_id, pose, covariance);
+}
+
+void PoseGraphOptimizer::addGravityFactor(
+    FrameId frame_id, const Eigen::Matrix<Scalar, 3, 1>& gravity_body) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (params_.enable_imu_gravity) {
+    factor_graph_->addGravityFactor(frame_id, gravity_body);
+  }
+}
+
+void PoseGraphOptimizer::addLoopClosure(const LoopCandidate& candidate) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  pending_loops_.push_back(candidate);
+  if (loop_cb_) {
+    loop_cb_(candidate);
+  }
 }
 
 void PoseGraphOptimizer::optimize() {
@@ -98,6 +127,7 @@ void PoseGraphOptimizer::reset() {
   factor_graph_->reset();
   loop_detector_->clear();
   pending_loops_.clear();
+  keyframe_counter_ = 0;
 }
 
 }  // namespace m20::backend

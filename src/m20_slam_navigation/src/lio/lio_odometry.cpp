@@ -1,10 +1,10 @@
 #include "m20_slam_navigation/lio/lio_odometry.hpp"
 #include "m20_slam_navigation/common/math_utils.hpp"
-
-#include <pcl/filters/voxel_grid.h>
+#include "m20_slam_navigation/lio/vendor_output_contract.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <thread>
 
 namespace m20::lio {
@@ -17,8 +17,8 @@ LIOOdometry::LIOOdometry(const SensorParams& sensor_params,
     , backend_params_(backend_params)
     , imu_processor_(std::make_unique<ImuProcessor>(sensor_params, lio_params))
     , deskewer_(std::make_unique<PointCloudDeskewer>(sensor_params.T_lidar_imu))
-    , voxel_map_(std::make_shared<VoxelMap>(lio_params.voxel_size, lio_params.max_voxels))
-    , vgicp_(std::make_unique<FastVAGICP>(lio_params))
+    , voxel_map_(std::make_shared<VoxelMap>(lio_params))
+    , eskf_(std::make_unique<VendorLioEskf>(sensor_params, lio_params))
 {
 }
 
@@ -31,7 +31,10 @@ void LIOOdometry::run() {
     if (!pkt_opt) continue;
 
     LiDARPacket pkt = std::move(*pkt_opt);
+    processing_scan_ = true;
     processScan(pkt);
+    ++processed_scans_;
+    processing_scan_ = false;
   }
 }
 
@@ -43,12 +46,15 @@ void LIOOdometry::stop() {
 }
 
 void LIOOdometry::addPointCloud(const LiDARPacket& pkt) {
+  const auto maximum = static_cast<std::size_t>(std::max(1, lio_params_.max_lidar_queue_size));
+  while (lidar_queue_.size() >= maximum) {
+    if (!lidar_queue_.try_pop()) break;
+    ++dropped_scans_;
+  }
   lidar_queue_.push(pkt);
 }
 
 void LIOOdometry::addImu(const ImuPacket& imu) {
-  imu_queue_.try_push(imu);
-  // Also feed to the IMU processor
   imu_processor_->addMeasurement(imu);
 }
 
@@ -61,89 +67,217 @@ PoseWithCovariance LIOOdometry::getCurrentPose() const {
   return pwc;
 }
 
+bool LIOOdometry::waitUntilIdle(std::chrono::milliseconds timeout) const {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (lidar_queue_.empty() && !processing_scan_.load()) {
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  return lidar_queue_.empty() && !processing_scan_.load();
+}
+
 void LIOOdometry::processScan(const LiDARPacket& pkt) {
   using namespace std::chrono;
+
+  if (!pkt.cloud || pkt.cloud->empty()) {
+    return;
+  }
 
   frame_counter_++;
   FrameId frame_id = frame_counter_;
 
-  // Step 1: Drain IMU queue and integrate for pose prior
-  ImuProcessor::IntegrationResult imu_result;
+  // Step 1: propagate continuously to the scan end.  The public vendor
+  // ImuProcess contract deskews into the end frame and leaves the ESKF state
+  // at lidar_end_time_, so registration must use the same timestamp.
+  ImuProcessor::IntegrationResult deskew_result;
+  SE3Pose registration_prior;
+  Eigen::Matrix<Scalar, 3, 1> velocity_at_scan = current_vel_;
+  std::vector<ImuPacket> covariance_imus;
   {
-    // Use last known pose and velocity for integration start
-    SE3Pose pose_prior = current_pose_;
-    Eigen::Matrix<Scalar, 3, 1> vel_prior = current_vel_;
+    SE3Pose pose_at_scan_start = current_pose_;
+    Eigen::Matrix<Scalar, 3, 1> velocity_at_scan_start = current_vel_;
 
-    // Find IMU buffer range for this scan
-    auto imu_data = imu_processor_->getMeasurementsBetween(
-        pkt.stamp, pkt.stamp);  // TODO: use actual scan start/end
-
-    if (!imu_data.empty()) {
-      Timestamp t_start = imu_data.front().stamp;
-      Timestamp t_end   = imu_data.back().stamp;
-      imu_result = imu_processor_->integrate(t_start, t_end, pose_prior, vel_prior, ba_, bg_);
+    // The corrected state is associated with the previous scan end.  Bridge
+    // the inter-scan interval first, then retain the in-scan trajectory for
+    // end-frame point compensation.
+    if (state_stamp_ && *state_stamp_ < pkt.stamp) {
+      const auto inter_scan = imu_processor_->integrate(
+        *state_stamp_, pkt.stamp, current_pose_, current_vel_, ba_, bg_);
+      pose_at_scan_start = inter_scan.pose_end;
+      velocity_at_scan_start = inter_scan.velocity_end;
+    }
+    deskew_result = imu_processor_->integrate(
+      pkt.stamp, pkt.scan_end, pose_at_scan_start, velocity_at_scan_start, ba_, bg_);
+    registration_prior = deskew_result.pose_end;
+    velocity_at_scan = deskew_result.velocity_end;
+    if (state_stamp_) {
+      covariance_imus = imu_processor_->getMeasurementsBetween(*state_stamp_, pkt.scan_end);
     } else {
-      // No IMU: use last pose directly
-      imu_result.pose_end = pose_prior;
-      imu_result.velocity_end = vel_prior;
-      imu_result.trajectory.push_back({pkt.stamp, pose_prior});
-      imu_result.gravity_direction = pose_prior.q.conjugate()._transformVector(lio_params_.gravity);
+      covariance_imus = imu_processor_->getMeasurementsBetween(pkt.stamp, pkt.scan_end);
     }
   }
 
+  // Apply the vendor skip_num contract before deskewing so the expensive IMU
+  // interpolation and registration stages both see the reduced point set.
+  pcl::PointCloud<pcl::PointXYZI>::Ptr sampled_cloud(
+      new pcl::PointCloud<pcl::PointXYZI>());
+  std::vector<double> sampled_offsets;
+  std::vector<std::uint16_t> sampled_rings;
+  const auto stride = static_cast<std::size_t>(std::max(1, lio_params_.point_stride));
+  const auto sampled_size = (pkt.cloud->size() + stride - 1U) / stride;
+  sampled_cloud->reserve(sampled_size);
+  sampled_offsets.reserve(sampled_size);
+  sampled_rings.reserve(sampled_size);
+  for (std::size_t index = 0; index < pkt.cloud->size(); index += stride) {
+    sampled_cloud->push_back(pkt.cloud->points[index]);
+    sampled_offsets.push_back(
+      index < pkt.point_time_offsets.size() ? pkt.point_time_offsets[index] : 0.0);
+    sampled_rings.push_back(index < pkt.rings.size() ? pkt.rings[index] : 0U);
+  }
+
   // Step 2: Deskew point cloud
-  auto deskewed = deskewer_->deskew(pkt.cloud, imu_result.trajectory, pkt.stamp);
+  auto deskewed = deskewer_->deskew(
+      sampled_cloud, sampled_offsets, deskew_result.trajectory, pkt.stamp);
 
-  // Step 3: Downsample for registration speed
-  pcl::VoxelGrid<pcl::PointXYZI> vg;
-  vg.setLeafSize(0.1, 0.1, 0.1);  // 10cm for speed
-  vg.setInputCloud(deskewed);
-  auto downsampled = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
-  vg.filter(*downsampled);
+  const auto products = makeVendorCloudProducts(
+    deskewed, sampled_offsets, sampled_rings,
+    sensor_params_.lidar_min_range, sensor_params_.lidar_max_range,
+    lio_params_.enable_downsample, lio_params_.downsample_leaf_size,
+    lio_params_.leaf_size_body);
+  const auto & body_output = products.body_cloud;
+  const auto & registration_output = products.registration_cloud;
+  const auto & downsampled = products.registration_points;
 
-  // Step 4: FastVAGICP registration to voxel map
-  VGICPResult reg_result = vgicp_->align(downsampled, voxel_map_, imu_result.pose_end);
+  if (downsampled->empty()) {
+    ++empty_registration_clouds_;
+    return;
+  }
 
-  if (reg_result.converged) {
-    // Step 5: Update state
+  // Bootstrap: scan-to-map registration cannot produce correspondences until
+  // the first scan has initialized the incremental voxel map.
+  if (voxel_map_->size() == 0) {
+    SE3Pose initial_pose = SE3Pose::Identity();
+    const auto init_window = duration_cast<nanoseconds>(
+      duration<double>(std::max(0.0, lio_params_.init_time)));
+    const auto init_imus = imu_processor_->getMeasurementsUpTo(pkt.scan_end);
+    const auto required_samples = static_cast<std::size_t>(
+      std::max(1, lio_params_.imu_init_samples));
+    if (init_imus.size() < required_samples ||
+      (lio_params_.init_time > 0.0 &&
+       (init_imus.size() < 2 ||
+        init_imus.back().stamp - init_imus.front().stamp < init_window)))
+    {
+      ++initialization_wait_scans_;
+      return;
+    }
+    if (init_imus.size() >= 2) {
+      Eigen::Matrix<Scalar, 3, 1> mean_accel = Eigen::Matrix<Scalar, 3, 1>::Zero();
+      Eigen::Matrix<Scalar, 3, 1> mean_gyro = Eigen::Matrix<Scalar, 3, 1>::Zero();
+      for (const auto & imu : init_imus) {
+        mean_accel += imu.accel;
+        mean_gyro += imu.gyro;
+      }
+      mean_accel /= static_cast<Scalar>(init_imus.size());
+      mean_gyro /= static_cast<Scalar>(init_imus.size());
+      initial_pose.q = imu_processor_->estimateInitialAttitude(init_imus, init_imus.size());
+      bg_ = mean_gyro;
+      const auto expected_specific_force =
+        initial_pose.q.conjugate()._transformVector(-lio_params_.gravity);
+      ba_ = mean_accel - expected_specific_force;
+    }
     {
       std::unique_lock<std::shared_mutex> lock(pose_mutex_);
-      current_pose_ = reg_result.T_world_lidar;
-      current_vel_  = imu_result.velocity_end;
-
-      // Gravity alignment: slowly update IMU biases from gravity direction
-      // Simplified: just track the gravity direction for the back-end
+      current_pose_ = initial_pose;
+      current_vel_.setZero();
+      state_stamp_ = pkt.scan_end;
     }
+    eskf_->initialize(initial_pose, current_vel_, bg_, ba_);
+    const SE3Pose initial_lidar_pose = initial_pose * sensor_params_.T_lidar_imu;
+    voxel_map_->insertCloud(downsampled, initial_lidar_pose);
+    ++bootstrap_scans_;
 
-    // Step 6: Update voxel map with new scan
-    voxel_map_->insertCloud(downsampled, reg_result.T_world_lidar);
-
-    // Step 7: Publish odometry
     if (odom_cb_) {
       PoseWithCovariance pwc;
-      pwc.pose = reg_result.T_world_lidar;
-      pwc.covariance = reg_result.information.inverse();
+      pwc.pose = initial_lidar_pose;
+      pwc.covariance = Eigen::Matrix<Scalar, 6, 6>::Identity() * 1e-3;
+      odom_cb_(pwc, frame_id, pkt.scan_end);
+    }
+    last_keyframe_pose_ = initial_lidar_pose;
+    last_keyframe_id_ = frame_id;
+    if (keyframe_cb_) {
+      keyframe_cb_(frame_id, initial_lidar_pose, downsampled);
+    }
+    if (aligned_cloud_cb_) {
+      aligned_cloud_cb_(body_output,
+                        makeVendorAlignedCloud(registration_output, initial_lidar_pose, nullptr),
+                        frame_id, pkt.scan_end);
+    }
+    return;
+  }
+
+  // Step 4: vendor-style iterated point-to-plane ESKF update.
+  eskf_->setPredictedNominal(registration_prior, velocity_at_scan);
+  eskf_->propagateCovariance(covariance_imus);
+  VendorLioUpdateResult reg_result = eskf_->update(downsampled, voxel_map_);
+
+  if (reg_result.converged) {
+    ++successful_updates_;
+    const auto& corrected = eskf_->state();
+    const SE3Pose T_world_lidar = corrected.pose * sensor_params_.T_lidar_imu;
+    {
+      std::unique_lock<std::shared_mutex> lock(pose_mutex_);
+      current_pose_ = corrected.pose;
+      current_vel_ = corrected.velocity;
+      bg_ = corrected.gyro_bias;
+      ba_ = corrected.accel_bias;
+      state_stamp_ = pkt.scan_end;
+    }
+
+    const auto aligned_output =
+      makeVendorAlignedCloud(registration_output, T_world_lidar, voxel_map_);
+    voxel_map_->insertCloud(downsampled, T_world_lidar);
+
+    if (odom_cb_) {
+      PoseWithCovariance pwc;
+      pwc.pose = T_world_lidar;
+      const auto regularized_information = reg_result.information +
+        Eigen::Matrix<Scalar, 6, 6>::Identity() * Scalar(1e-6);
+      pwc.covariance = regularized_information.inverse();
       // Clamp diagonal for safety
       for (int i = 0; i < 6; ++i) {
         pwc.covariance(i, i) = math::clamp(pwc.covariance(i, i), Scalar(1e-6), Scalar(100.0));
       }
-      odom_cb_(pwc, frame_id);
+      odom_cb_(pwc, frame_id, pkt.scan_end);
     }
 
-    // Step 8: Check if keyframe
-    if (isKeyframe(reg_result.T_world_lidar, last_keyframe_pose_) || frame_id == 1) {
-      last_keyframe_pose_ = reg_result.T_world_lidar;
+    if (isKeyframe(T_world_lidar, last_keyframe_pose_) || frame_id == 1) {
+      last_keyframe_pose_ = T_world_lidar;
       last_keyframe_id_ = frame_id;
 
       if (keyframe_cb_) {
-        keyframe_cb_(frame_id, reg_result.T_world_lidar, deskewed);
+        keyframe_cb_(frame_id, T_world_lidar, deskewed);
       }
     }
+    if (aligned_cloud_cb_) {
+      aligned_cloud_cb_(body_output, aligned_output,
+                        frame_id, pkt.scan_end);
+    }
   } else {
-    // Registration failed: fall back to IMU-only prediction
+    ++rejected_updates_;
+    // Keep the IMU-predicted ESKF state when too few planar observations are
+    // available (for example, during map bootstrap or severe occlusion).
+    const auto& predicted = eskf_->state();
     std::unique_lock<std::shared_mutex> lock(pose_mutex_);
-    current_pose_ = imu_result.pose_end;
-    current_vel_  = imu_result.velocity_end;
+    current_pose_ = predicted.pose;
+    current_vel_ = predicted.velocity;
+    bg_ = predicted.gyro_bias;
+    ba_ = predicted.accel_bias;
+    state_stamp_ = pkt.scan_end;
+    if (registration_failure_cb_) {
+      registration_failure_cb_(reg_result);
+    }
   }
 }
 

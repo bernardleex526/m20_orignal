@@ -38,13 +38,15 @@ public:
   /**
    * @brief Deskew raw point cloud using IMU trajectory.
    *
-   * @param raw_cloud    Input point cloud with per-point timestamps (in pcl::PointXYZI intensity field as time offset [s]).
+   * @param raw_cloud    Input point cloud.
+   * @param point_time_offsets Per-point seconds from scan start.
    * @param trajectory   IMU-propagated trajectory: list of (timestamp, SE3Pose) from ImuProcessor.
    * @param scan_start   Timestamp of scan start.
    * @return             Deskewed point cloud.
    */
   pcl::PointCloud<pcl::PointXYZI>::Ptr deskew(
       const pcl::PointCloud<pcl::PointXYZI>::Ptr& raw_cloud,
+      const std::vector<double>& point_time_offsets,
       const std::vector<std::pair<Timestamp, SE3Pose>>& trajectory,
       const Timestamp& scan_start);
 

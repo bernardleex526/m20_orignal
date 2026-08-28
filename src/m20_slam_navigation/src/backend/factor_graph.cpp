@@ -75,6 +75,11 @@ void FactorGraph::addOdometryFactor(
     gtsam::Pose3 prev_pose;
     if (initial_values_.exists(X(prev_id))) {
       prev_pose = initial_values_.at<gtsam::Pose3>(X(prev_id));
+    } else if (result_.exists(X(prev_id))) {
+      // Incremental updates clear initial_values_ after each iSAM2 update.
+      // Seed the next keyframe from the current optimized predecessor rather
+      // than incorrectly restarting the chain at the identity pose.
+      prev_pose = result_.at<gtsam::Pose3>(X(prev_id));
     } else {
       prev_pose = gtsam::Pose3::Identity();
     }
@@ -90,10 +95,11 @@ void FactorGraph::addGravityFactor(
 
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // Noise: diagonal with gravity_noise_sigma
+  Eigen::Vector3d gravity_sigmas;
+  gravity_sigmas << params_.imu_gravity_noise[0], params_.imu_gravity_noise[1],
+    params_.imu_gravity_noise[2];
   gtsam::noiseModel::Diagonal::shared_ptr noise =
-      gtsam::noiseModel::Diagonal::Sigmas(
-          Eigen::Vector3d::Constant(params_.gravity_noise_sigma));
+      gtsam::noiseModel::Diagonal::Sigmas(gravity_sigmas);
 
   graph_.add(GravityPriorFactor(
       X(frame_id), gravity_body.cast<double>(), noise));
@@ -107,10 +113,15 @@ void FactorGraph::addLoopClosureFactor(
 
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // Loop closure noise (typically larger than odometry)
-  Eigen::Matrix<double, 6, 6> cov = Eigen::Matrix<double, 6, 6>::Identity();
-  cov.block<3, 3>(0, 0) *= params_.loop_closure_noise_rot * params_.loop_closure_noise_rot;
-  cov.block<3, 3>(3, 3) *= params_.loop_closure_noise_trans * params_.loop_closure_noise_trans;
+  // GTSAM Pose3 tangent ordering is [rx, ry, rz, tx, ty, tz], matching the
+  // native pgo.loop_noise_sigmas vector.  Preserve anisotropic uncertainty
+  // instead of replacing it with one scalar for each block.
+  Eigen::Matrix<double, 6, 6> cov = Eigen::Matrix<double, 6, 6>::Zero();
+  for (int i = 0; i < 6; ++i) {
+    const double sigma = std::max<double>(
+      params_.loop_noise_sigmas[static_cast<std::size_t>(i)], 1e-9);
+    cov(i, i) = sigma * sigma;
+  }
 
   gtsam::noiseModel::Gaussian::shared_ptr noise =
       gtsam::noiseModel::Gaussian::Covariance(cov);

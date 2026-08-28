@@ -1,86 +1,88 @@
-"""
-M20 Pro — Full SLAM System Launch
-
-Launches:
-  - slam_node: LIO Front-End + Back-End Factor Graph + Loop Closure
-  - RViz visualization (optional)
-  - Static TF transforms (LiDAR → IMU → Base)
-
-Usage:
-  ros2 launch m20_slam_navigation slam_system.launch.py use_rviz:=true
-"""
+"""One-launch M20 Pro mapping using the official ROS 2 / DDS interfaces."""
 
 import os
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
+
 from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import LifecycleNode, Node
 
 
 def generate_launch_description():
-    pkg_dir = get_package_share_directory("m20_slam_navigation")
+    package_dir = get_package_share_directory("m20_slam_navigation")
+    config_path = os.path.join(package_dir, "config", "m20_mapping.yaml")
+    rviz_path = os.path.join(package_dir, "rviz", "slam_view.rviz")
 
-    # ---- Launch Arguments ----
-    use_rviz = LaunchConfiguration("use_rviz", default="true")
-    log_level = LaunchConfiguration("log_level", default="info")
-    config_dir = os.path.join(pkg_dir, "config")
+    use_rviz = LaunchConfiguration("use_rviz")
+    use_sim_time = LaunchConfiguration("use_sim_time")
+    lidar_topic = LaunchConfiguration("lidar_topic")
+    lidar_transport = LaunchConfiguration("lidar_transport")
+    drdds_socket_path = LaunchConfiguration("drdds_socket_path")
+    imu_topic = LaunchConfiguration("imu_topic")
+    imu_transport = LaunchConfiguration("imu_transport")
+    drdds_imu_socket_path = LaunchConfiguration("drdds_imu_socket_path")
+    map_save_path = LaunchConfiguration("map_save_path")
+    max_lidar_queue_size = LaunchConfiguration("max_lidar_queue_size")
+    checkpoint_save_period_s = LaunchConfiguration("checkpoint_save_period_s")
+    log_level = LaunchConfiguration("log_level")
 
-    declare_use_rviz = DeclareLaunchArgument("use_rviz", default_value="true",
-                                             description="Launch RViz")
-    declare_log_level = DeclareLaunchArgument("log_level", default_value="info",
-                                              description="Logging level")
-
-    # ---- Static TF: base_link → lidar_link ----
-    static_tf_base_lidar = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        arguments=["0.15", "0.0", "0.05", "0.0", "0.0", "0.0", "1.0",
-                   "base_link", "lidar_link"],
-        name="static_tf_base_lidar",
-    )
-
-    # Static TF: base_link → imu_link
-    static_tf_base_imu = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        arguments=["0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "1.0",
-                   "base_link", "imu_link"],
-        name="static_tf_base_imu",
-    )
-
-    # ---- SLAM Node (LIO + Back-End) ----
-    slam_node = Node(
+    slam_node = LifecycleNode(
         package="m20_slam_navigation",
         executable="slam_node",
         name="slam_node",
+        namespace="",
         output="screen",
+        emulate_tty=True,
         parameters=[
-            os.path.join(config_dir, "sensors.yaml"),
-            os.path.join(config_dir, "lio_params.yaml"),
-            os.path.join(config_dir, "backend_params.yaml"),
+            config_path,
+            {
+                "use_sim_time": use_sim_time,
+                "lidar_topic": lidar_topic,
+                "lidar_transport": lidar_transport,
+                "drdds.socket_path": drdds_socket_path,
+                "imu_topic": imu_topic,
+                "imu_transport": imu_transport,
+                "drdds.imu_socket_path": drdds_imu_socket_path,
+                "map_save_path": map_save_path,
+                "lio.max_lidar_queue_size": max_lidar_queue_size,
+                "checkpoint_save_period_s": checkpoint_save_period_s,
+            },
         ],
         arguments=["--ros-args", "--log-level", log_level],
-        emulate_tty=True,
     )
 
-    # ---- RViz ----
-    rviz_config = os.path.join(pkg_dir, "rviz", "slam_view.rviz")
-    rviz_node = Node(
+    rviz = Node(
         package="rviz2",
         executable="rviz2",
-        name="rviz2",
-        arguments=["-d", rviz_config],
-        condition=lambda _: use_rviz.value == "true",
+        name="m20_mapping_rviz",
+        arguments=["-d", rviz_path],
+        condition=IfCondition(use_rviz),
+        output="screen",
     )
 
-    return LaunchDescription([
-        declare_use_rviz,
-        declare_log_level,
-        static_tf_base_lidar,
-        static_tf_base_imu,
-        slam_node,
-        rviz_node,
-    ])
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument("use_rviz", default_value="true"),
+            DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument("lidar_topic", default_value="/LIDAR/POINTS"),
+            DeclareLaunchArgument("lidar_transport", default_value="drdds"),
+            DeclareLaunchArgument(
+                "drdds_socket_path", default_value="/tmp/m20_drdds_lidar.sock"
+            ),
+            DeclareLaunchArgument("imu_topic", default_value="/IMU"),
+            DeclareLaunchArgument("imu_transport", default_value="drdds"),
+            DeclareLaunchArgument(
+                "drdds_imu_socket_path", default_value="/tmp/m20_drdds_imu.sock"
+            ),
+            DeclareLaunchArgument(
+                "map_save_path", default_value="maps/m20_map/full_cloud.pcd"
+            ),
+            DeclareLaunchArgument("max_lidar_queue_size", default_value="3"),
+            DeclareLaunchArgument("checkpoint_save_period_s", default_value="10.0"),
+            DeclareLaunchArgument("log_level", default_value="info"),
+            slam_node,
+            rviz,
+        ]
+    )

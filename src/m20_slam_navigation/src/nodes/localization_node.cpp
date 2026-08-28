@@ -67,7 +67,8 @@ public:
     lidar_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
         "/LIDAR/pointcloud", rclcpp::SensorDataQoS(),
         [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
-          auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+          pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(
+            new pcl::PointCloud<pcl::PointXYZ>());
           pcl::fromROSMsg(*msg, *cloud);
 
           if (!relocalizer_->isLocalized()) {
