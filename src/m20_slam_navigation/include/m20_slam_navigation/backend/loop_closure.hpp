@@ -35,11 +35,14 @@ struct ScanContextDescriptor {
   static constexpr int kNumRings   = 20;
   static constexpr int kNumSectors = 60;
 
-  Eigen::Matrix<Scalar, kNumRings, kNumSectors> data;
-  Eigen::Matrix<Scalar, 1, kNumRings>           ring_key;  ///< for fast candidate search
-  FrameId                                        frame_id;
-  SE3Pose                                        pose;
-  pcl::PointCloud<pcl::PointXYZI>::Ptr           cloud;
+  Eigen::Matrix<Scalar, kNumRings, kNumSectors> data{
+    Eigen::Matrix<Scalar, kNumRings, kNumSectors>::Zero()};
+  Eigen::Matrix<Scalar, 1, kNumRings> ring_key{
+    Eigen::Matrix<Scalar, 1, kNumRings>::Zero()};  ///< for fast candidate search
+  FrameId frame_id{INVALID_FRAME_ID};
+  SE3Pose pose;
+  pcl::PointCloud<pcl::PointXYZI>::Ptr cloud{
+    std::make_shared<pcl::PointCloud<pcl::PointXYZI>>()};
 
   /// Compute cosine distance to another descriptor, searching best column alignment
   Scalar distance(const ScanContextDescriptor& other) const;

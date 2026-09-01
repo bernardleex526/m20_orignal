@@ -1,29 +1,121 @@
-# ============================================================================
-# Prior Map Relocalization Parameters
-# ============================================================================
+# M20Pro native localization contract.
+# Values mirror /opt/robot/share/localization/conf/params.yaml from the
+# 2026-08-25 NOS snapshot. Adapter-only settings are grouped under adapter.*
+# and frames.* so the native names remain directly auditable.
 
-localization:
-  # ---- Prior Map ----
-  map_path: "full_cloud.pcd"               # path to pre-built static point cloud
-  map_voxel_leaf_size: 0.2                 # [m] downsampling for efficient matching
+localization_node:
+  ros__parameters:
+    common.mode: 0
+    common.max_thread_num: 8
+    common.extrinsic_I_B: [1.0, 0.0, 0.0, 0.0,
+                           0.0, 1.0, 0.0, 0.0,
+                           0.0, 0.0, 1.0, 0.0,
+                           0.0, 0.0, 0.0, 1.0]
+    common.init_pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+    common.frame_queue_keep_length: 3
 
-  # ---- 3D NDT Matching ----
-  ndt_resolution: 1.0                      # [m] NDT grid resolution
-  ndt_max_iterations: 30                   # max Newton iterations
-  ndt_step_size: 0.1                       # gradient step size
-  ndt_epsilon: 0.0001                      # convergence threshold
-  ndt_outlier_ratio: 0.55                  # expected outlier fraction
+    node.input_lidar_topic: "/LIDAR/POINTS"
+    node.input_imu_topic: "/IMU"
+    node.input_rtk_topic: "/GPYBM"
+    node.leg_odom_topic: "/leg_odom"
+    node.output_odom_topic: "/ODOM"
+    node.output_enu_topic: "/RTK_RAW_ODOM"
+    node.output_global_map_topic: "/FULL_CLOUD_MAP"
+    node.output_body_cloud_topic: "/LOC_BODY_POINTS"
+    node.initial_pose_topic: "/initialpose"
+    node.global_map_leaf_size_viz: 0.5
+    node.lidar_type: 1
+    node.lidar_use_system_time: false
+    node.imu_use_system_time: false
+    node.body_cloud_box_filter: true
+    node.body_cloud_box_min: [-5.0, -5.0, -1.5]
+    node.body_cloud_box_max: [5.0, 5.0, 1.5]
+    node.body_cloud_voxel_filter: false
+    node.body_cloud_voxel_leaf_size: 0.03
 
-  # ---- Global Relocalization (Multi-Hypothesis) ----
-  num_hypotheses: 8                        # number of initial pose hypotheses
-  hypothesis_trans_range: 5.0              # [m] search radius in xy
-  hypothesis_rot_range: 3.14159            # [rad] search in yaw (full 360°)
+    cloud_preprocess.skip_num: 1
+    cloud_preprocess.leaf_size: 0.3
+    cloud_preprocess.extrinsic_I_L: [1.0, 0.0, 0.0, 0.0,
+                                     0.0, 1.0, 0.0, 0.0,
+                                     0.0, 0.0, 1.0, 0.0,
+                                     0.0, 0.0, 0.0, 1.0]
 
-  # ---- ESKF (Error-State Kalman Filter) ----
-  eskf_accel_noise: 0.1                    # process noise: acceleration
-  eskf_gyro_noise: 0.01                    # process noise: angular velocity
-  eskf_accel_bias_noise: 0.0001            # accel bias random walk
-  eskf_gyro_bias_noise: 0.000001           # gyro bias random walk
-  eskf_ndt_pos_noise: 0.1                  # NDT observation noise: position [m]
-  eskf_ndt_rot_noise: 0.05                 # NDT observation noise: rotation [rad]
-  eskf_odom_pos_noise: 0.02                # foot odometry observation noise [m]
+    optimization.smoother_lag: 3.0
+    optimization.update_count: 1
+    optimization.acc_cov: 0.1
+    optimization.gyr_cov: 0.1
+    optimization.bias_acc_cov: 0.01
+    optimization.bias_gyr_cov: 0.01
+    optimization.integration_cov: 0.01
+    optimization.ght_vio_cov_scale: 1.0
+    optimization.imu_gravity: 9.80511
+    optimization.max_edge: [0.6, 0.6, 0.5]
+    optimization.min_edge: [-0.6, -0.6, -0.5]
+    optimization.vel_lim: [5.0, 5.0, 10.0]
+    optimization.default_prior_pose_cov: [1.0e-8, 1.0e-8, 1.0e-8,
+                                           1.0e-6, 1.0e-6, 1.0e-6]
+    optimization.default_prior_vel_cov: [1.0e8, 1.0e8, 1.0e8]
+    optimization.default_prior_bias_cov: [1.0e-4, 1.0e-4, 1.0e-4,
+                                           1.0e-4, 1.0e-4, 1.0e-4]
+    optimization.fixed_global_registration_cov: [0.0001, 0.0001, 0.0001,
+                                                   0.0001, 0.0001, 0.0001]
+    optimization.leg_odom_cov: [0.005, 0.005, 0.005, 0.005, 0.005, 0.005]
+    optimization.grav_cov: [1.0e5, 1.0e5, 1.0e15]
+
+    static_map_registration.static_map_path: "/var/opt/robot/data/maps/active/"
+    static_map_registration.pcd_file_name: "full_cloud.pcd"
+    static_map_registration.registration.num_threads: 4
+    static_map_registration.registration.max_iterations: 20
+    static_map_registration.registration.convergence_thresh_rot: 1.0e-4
+    static_map_registration.registration.convergence_thresh_trans: 1.0e-4
+    static_map_registration.valid_global_registration_ratio_thresh: 0.3
+
+    monitor.state_win_size: 10
+    monitor.error_win_size: 10
+    monitor.vel_check_duration: 1.0
+    monitor.vel_linear_limit: 5.0
+    monitor.vel_angular_limit: 6.0
+    monitor.vel_error_frac_th: 0.8
+    monitor.predict_error_check_duration: 1.0
+    monitor.error_linear_limit: 0.5
+    monitor.error_angular_limit: 0.5
+    monitor.predict_error_frac_th: 0.8
+    monitor.matching_error_win_size: 20
+    monitor.matching_error_check_duration: 2.0
+    monitor.matching_error_th: 0.25
+    monitor.inlier_ratio_th: 0.85
+    monitor.matching_error_frac_th: 0.5
+    monitor.odom_update_time_limit: 1.0
+    monitor.found_judge_time_limit: 3.0
+    monitor.auto_reloc: false
+    monitor.reloc_loss_time: 10.0
+    monitor.reloc_loss_again_time: 10.0
+
+    ght.extrinsic: [-1.0, 0.0, 0.0, 0.16,
+                    0.0, 0.0, -1.0, 0.0,
+                    0.0, -1.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0]
+    ght.vio_default_cov: [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]
+    ght.viro_default_cov: [0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001]
+    ght.rtk_default_cov: [0.00001, 0.00001, 0.00001,
+                          0.00001, 0.00001, 0.00001]
+    ght.path: "/var/opt/robot/data/maps/active/"
+
+    frames.world: "camera_init"
+    frames.map: "map"
+    frames.odom: "odom"
+    frames.body: "base_link"
+    frames.lidar: "lidar_link"
+    frames.imu: "imu_link"
+    frames.publish_world_to_odom_tf: true
+
+    # Empty means static_map_path/pcd_file_name; launch can override it.
+    adapter.map_path: ""
+    adapter.ndt_resolution: 1.0
+    adapter.ndt_step_size: 0.1
+    adapter.ndt_outlier_ratio: 0.55
+    adapter.num_hypotheses: 8
+    adapter.hypothesis_trans_range: 5.0
+    adapter.hypothesis_rot_range: 3.141592653589793
+    # The generated /GPYBM type is available only with the robot DrDDS SDK.
+    adapter.rtk_ros_type: ""

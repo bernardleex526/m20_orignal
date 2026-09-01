@@ -15,6 +15,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -188,10 +189,10 @@ struct PoseWithCovariance {
 // Loop closure candidate
 // =============================================================================
 struct LoopCandidate {
-  FrameId src_frame;
-  FrameId tgt_frame;
+  FrameId src_frame{INVALID_FRAME_ID};
+  FrameId tgt_frame{INVALID_FRAME_ID};
   SE3Pose relative_pose;
-  Scalar  fitness_score;
+  Scalar  fitness_score{std::numeric_limits<Scalar>::infinity()};
 };
 
 // =============================================================================
@@ -220,10 +221,10 @@ struct ESKFState {
 // Planar motion primitive for hybrid A* (omnidirectional)
 // =============================================================================
 struct MotionPrimitive {
-  Scalar dx;       ///< x displacement [m]
-  Scalar dy;       ///< y displacement [m]
-  Scalar dtheta;   ///< heading change [rad]
-  Scalar cost;     ///< primitive cost
+  Scalar dx{0.0};       ///< x displacement [m]
+  Scalar dy{0.0};       ///< y displacement [m]
+  Scalar dtheta{0.0};   ///< heading change [rad]
+  Scalar cost{0.0};     ///< primitive cost
 };
 
 }  // namespace m20

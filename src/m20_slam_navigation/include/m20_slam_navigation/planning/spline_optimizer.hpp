@@ -58,11 +58,18 @@ private:
                                  const Eigen::Matrix<Scalar, 3, 1>& curr,
                                  const Eigen::Matrix<Scalar, 3, 1>& next);
 
-  /// Check if smoothed waypoint is collision-free
-  bool isCollisionFree(Scalar x, Scalar y,
+  /// Check whether the robot footprint at a pose is collision-free.
+  bool isCollisionFree(Scalar x, Scalar y, Scalar theta,
                        const std::vector<uint8_t>& costmap,
                        int width, int height, Scalar resolution,
                        Scalar origin_x, Scalar origin_y) const;
+
+  /// Validate every pose and the swept footprint between adjacent poses.
+  bool isPathCollisionFree(
+      const std::vector<Eigen::Matrix<Scalar, 3, 1>>& path,
+      const std::vector<uint8_t>& costmap,
+      int width, int height, Scalar resolution,
+      Scalar origin_x, Scalar origin_y) const;
 
   GlobalPlannerParams params_;
 };

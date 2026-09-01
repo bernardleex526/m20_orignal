@@ -1,0 +1,17 @@
+# Snapshot of /opt/robot/share/global_planner/config/config.yaml.
+# The executable consumes these names through the native DrDDS bridge.
+map_sub_topic: "/GRID_MAP"
+start_sub_topic: "/initialpose"
+goal_sub_topic: "/goal_pose"
+goal_sub_service: "/GOAL_GLOBAL"
+pc_sub_topic: "/NAV_POINTS"
+odom_sub_topic: "/ODOM"
+cancel_sub_topic: "/CANCEL_NAV"
+cancel_sub_service: "/CANCEL_NAV_GLOBAL"
+mode_sub_topic: "/planner_mode"
+global_path_topic: "/path_Astar"
+visible_points_topic: "/vis_global_points"
+pruned_visible_points_topic: "/vis_global_points_pruned"
+local_goal_topic: "/local_goal"
+global_map_topic: "/local_map"
+planner_status_topic: "/GLOBAL_PLANNER_STATUS"

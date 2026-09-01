@@ -33,11 +33,12 @@ namespace m20::localization {
 
 struct NDTResult {
   SE3Pose                          T_world_lidar;
-  Eigen::Matrix<Scalar, 6, 6>      information;
-  double                           fitness_score;
-  double                           transformation_probability;
-  int                              iterations;
-  bool                             converged;
+  Eigen::Matrix<Scalar, 6, 6>      information{
+    Eigen::Matrix<Scalar, 6, 6>::Zero()};
+  double                           fitness_score{1e9};
+  double                           transformation_probability{0.0};
+  int                              iterations{0};
+  bool                             converged{false};
 };
 
 class NDTMatcher {

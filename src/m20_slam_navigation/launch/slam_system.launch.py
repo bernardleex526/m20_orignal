@@ -77,7 +77,8 @@ def generate_launch_description():
                 "drdds_imu_socket_path", default_value="/tmp/m20_drdds_imu.sock"
             ),
             DeclareLaunchArgument(
-                "map_save_path", default_value="maps/m20_map/full_cloud.pcd"
+                "map_save_path",
+                default_value="/var/opt/robot/data/maps/active/full_cloud.pcd",
             ),
             DeclareLaunchArgument("max_lidar_queue_size", default_value="3"),
             DeclareLaunchArgument("checkpoint_save_period_s", default_value="10.0"),

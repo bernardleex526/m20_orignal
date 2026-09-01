@@ -6,7 +6,8 @@
 namespace m20::planning {
 
 std::vector<MotionPrimitive> MotionPrimitives::generateOmnidirectional(
-    int num_angles, Scalar primitive_len, Scalar max_curvature, int num_rotations) {
+    int num_angles, Scalar primitive_len, Scalar max_curvature, int num_rotations,
+    Scalar max_heading_change) {
 
   std::vector<MotionPrimitive> primitives;
 
@@ -26,7 +27,8 @@ std::vector<MotionPrimitive> MotionPrimitives::generateOmnidirectional(
 
     // For each translation direction, add rotation variants
     // Straight (dθ = 0), left turn (dθ > 0), right turn (dθ < 0)
-    Scalar dtheta_max = max_curvature * primitive_len;  // κ_max · L
+    Scalar dtheta_max = max_heading_change > 0.0
+        ? max_heading_change : max_curvature * primitive_len;
 
     for (int r = 0; r < num_rotations; ++r) {
       MotionPrimitive mp;

@@ -60,4 +60,9 @@ std::vector<Eigen::Matrix<Scalar, 3, 1>> GlobalPlannerNode::getPlan() const {
   return current_plan_;
 }
 
+void GlobalPlannerNode::clearPlan() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  current_plan_.clear();
+}
+
 }  // namespace m20::planning

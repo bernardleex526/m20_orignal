@@ -36,17 +36,6 @@
 
 namespace m20::localization {
 
-/// ESKF observation callback: provides predicted measurement and Jacobian
-template <int DimZ>
-struct ESKFObservation {
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-  Eigen::Matrix<Scalar, DimZ, 1>          z;          ///< measurement vector
-  Eigen::Matrix<Scalar, DimZ, 1>          z_pred;     ///< predicted measurement h(x_nom)
-  Eigen::Matrix<Scalar, DimZ, 15>         H;          ///< Jacobian ∂h/∂δx at δx=0
-  Eigen::Matrix<Scalar, DimZ, DimZ>       R;          ///< measurement noise covariance
-};
-
 class ESKF {
 public:
   ESKF(const LocalizationParams& params);

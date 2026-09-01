@@ -25,13 +25,17 @@ void ElevationGrid::update(
     const SE3Pose& T_world_lidar) {
 
   for (const auto& pt : cloud->points) {
+    // Sensor range and configured height bounds are expressed in the incoming
+    // body/gravity frame, not relative to the world origin.
+    const Scalar range = std::hypot(static_cast<Scalar>(pt.x), static_cast<Scalar>(pt.y));
+    if (range < params_.min_range || range > params_.max_range ||
+        pt.z < params_.map_height_min || pt.z > params_.map_height_max) {
+      continue;
+    }
+
     // Transform to world frame
     Eigen::Matrix<Scalar, 3, 1> p_lidar(pt.x, pt.y, pt.z);
     Eigen::Matrix<Scalar, 3, 1> p_world = T_world_lidar.transformPoint(p_lidar);
-
-    // Range filter
-    Scalar range = std::sqrt(p_world.x() * p_world.x() + p_world.y() * p_world.y());
-    if (range < params_.min_range || range > params_.max_range) continue;
 
     // Project to grid
     int gx, gy;

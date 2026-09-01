@@ -51,6 +51,9 @@ public:
   /// Get latest plan
   std::vector<Eigen::Matrix<Scalar, 3, 1>> getPlan() const;
 
+  /// Clear the current plan after a native cancel request.
+  void clearPlan();
+
   /// Set plan callback
   void setPlanCallback(PlanCallback cb) { plan_cb_ = std::move(cb); }
 

@@ -2,6 +2,11 @@
 
 Review date: 2026-08-26
 
+> Historical review snapshot. Its build state, topic names and remaining-work
+> list describe the 2026-08-26 import and are not the current repository
+> contract. Use the root `README.md` and
+> `M20PRO_NATIVE_NAVIGATION_ADAPTATION.md` for the reviewed 2026-09-01 state.
+
 This document records the gap between the initial repository snapshot and a runnable M20Pro
 mapping workflow. The primary acceptance target is deliberately narrow: consume the official
 M20Pro LiDAR and IMU interfaces, run an isolated 3D mapper, and save a point-cloud map through

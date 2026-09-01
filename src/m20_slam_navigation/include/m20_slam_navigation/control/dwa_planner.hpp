@@ -90,6 +90,7 @@ private:
   /// Score a trajectory
   DWAScore scoreTrajectory(
       const std::vector<Eigen::Matrix<Scalar, 3, 1>>& trajectory,
+      const Eigen::Matrix<Scalar, 3, 1>& current_pose,
       const std::vector<Eigen::Matrix<Scalar, 3, 1>>& global_path,
       const std::vector<uint8_t>& costmap,
       int costmap_width, int costmap_height, Scalar costmap_resolution,

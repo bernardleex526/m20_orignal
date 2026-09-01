@@ -1,5 +1,9 @@
 # M20Pro SLAM 迁移适配与实机验收交接文档
 
+> 历史交接快照：本文记录 2026-08-27 当时的工作树、主机和验证边界，不代表当前
+> 仓库状态。当前构建、接口和验收结论以根目录 `README.md` 及
+> `M20PRO_NATIVE_NAVIGATION_ADAPTATION.md` 为准。
+
 更新时间：2026-08-27
 适用工作区：`/home/lee/m20_orignal`
 当前分支：`codex/m20pro-direct-mapping`
@@ -70,7 +74,7 @@ ssh: connect to host 192.168.101.36 port 22: No route to host
 | GOS | `10.21.31.104` | `user` | ARM64/Foxy 构建主机 | Ubuntu 20.04、ROS 2 Foxy、ARM64 |
 | 跳板机 | `192.168.101.36` | `user` | 从 ZKYD-GUEST 访问机器狗内网 | SSH ProxyJump |
 
-当前测试密码为英文单引号：`'`。该密码只用于现场设备，不应提交到公共仓库或公开文档。
+现场设备凭据不属于仓库内容。登录时由操作者在终端中输入，禁止写入源码、文档或脚本。
 
 ### 3.3 SSH 命令
 

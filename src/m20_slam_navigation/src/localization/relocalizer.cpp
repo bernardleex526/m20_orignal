@@ -1,6 +1,7 @@
 #include "m20_slam_navigation/localization/relocalizer.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace m20::localization {
 
@@ -36,7 +37,8 @@ bool Relocalizer::relocalize(
     // Good match: initialize ESKF
     eskf_->initialize(ndt_result.T_world_lidar);
     localized_ = true;
-    last_ndt_pose_ = ndt_result.T_world_lidar;
+    last_imu_stamp_.reset();
+    odom_alignment_initialized_ = false;
 
     if (reloc_cb_) {
       reloc_cb_(ndt_result.T_world_lidar, true);
@@ -45,7 +47,6 @@ bool Relocalizer::relocalize(
   }
 
   // Multi-hypothesis global search
-  auto bounds = map_loader_->getBounds();
   Eigen::Matrix<Scalar, 3, 1> search_center = initial_guess.pose.t;
   Scalar search_radius = loc_params_.hypothesis_trans_range;
 
@@ -56,7 +57,8 @@ bool Relocalizer::relocalize(
   if (ndt_result.converged && ndt_result.fitness_score < 5.0) {
     eskf_->initialize(ndt_result.T_world_lidar);
     localized_ = true;
-    last_ndt_pose_ = ndt_result.T_world_lidar;
+    last_imu_stamp_.reset();
+    odom_alignment_initialized_ = false;
 
     if (reloc_cb_) {
       reloc_cb_(ndt_result.T_world_lidar, true);
@@ -75,8 +77,13 @@ void Relocalizer::predict(const ImuPacket& imu) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!localized_) return;
 
-  // Compute dt from last prediction (simplified: use nominal 200Hz)
-  Scalar dt = 1.0 / sensor_params_.imu_hz;
+  if (!last_imu_stamp_) {
+    last_imu_stamp_ = imu.stamp;
+    return;
+  }
+  const Scalar dt = std::chrono::duration<Scalar>(imu.stamp - *last_imu_stamp_).count();
+  last_imu_stamp_ = imu.stamp;
+  if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.1) return;
   eskf_->predict(imu.accel, imu.gyro, dt);
 }
 
@@ -84,13 +91,19 @@ void Relocalizer::updateOdometry(const FootOdomPacket& odom) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!localized_) return;
 
+  if (!odom_alignment_initialized_) {
+    world_odom_ = eskf_->getPose() * odom.pose.inverse();
+    odom_alignment_initialized_ = true;
+  }
+  const SE3Pose world_body = world_odom_ * odom.pose;
+
   Eigen::Matrix<Scalar, 6, 6> R_odom = odom.covariance;
   // Inflate covariance for slip uncertainty
   for (int i = 0; i < 6; ++i) {
     R_odom(i, i) *= (1.0 + sensor_params_.odom_slip_ratio);
   }
 
-  eskf_->updateOdometry(odom.pose, R_odom);
+  eskf_->updateOdometry(world_body, R_odom);
   eskf_->injectErrorAndReset();
 }
 
@@ -104,12 +117,10 @@ void Relocalizer::updateNDT(const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud) {
   NDTResult ndt_result = ndt_matcher_->align(cloud, T_init);
 
   if (ndt_result.converged && ndt_result.fitness_score < 5.0) {
-    last_ndt_pose_ = ndt_result.T_world_lidar;
-
     // Build measurement covariance from NDT fitness
     Eigen::Matrix<Scalar, 6, 6> R_ndt = Eigen::Matrix<Scalar, 6, 6>::Identity();
-    R_ndt.block<3, 3>(0, 0) *= loc_params_.eskf_ndt_rot_noise * ndt_result.fitness_score;
-    R_ndt.block<3, 3>(3, 3) *= loc_params_.eskf_ndt_pos_noise * ndt_result.fitness_score;
+    R_ndt.block<3, 3>(0, 0) *= loc_params_.eskf_ndt_pos_noise * ndt_result.fitness_score;
+    R_ndt.block<3, 3>(3, 3) *= loc_params_.eskf_ndt_rot_noise * ndt_result.fitness_score;
 
     eskf_->updateNDT(ndt_result.T_world_lidar, R_ndt);
     eskf_->injectErrorAndReset();
@@ -124,6 +135,18 @@ PoseWithCovariance Relocalizer::getCurrentPose() const {
     pwc.covariance = eskf_->getCovariance().block<6, 6>(0, 0);  // pose covariance block
   }
   return pwc;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr Relocalizer::getGlobalMap() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return map_loader_ ? map_loader_->getFullMap() : nullptr;
+}
+
+void Relocalizer::reset() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  localized_ = false;
+  last_imu_stamp_.reset();
+  odom_alignment_initialized_ = false;
 }
 
 }  // namespace m20::localization

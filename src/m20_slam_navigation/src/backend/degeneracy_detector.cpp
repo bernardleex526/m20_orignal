@@ -104,49 +104,4 @@ DegeneracyResult DegeneracyDetector::analyze(
   return result;
 }
 
-Eigen::Matrix<Scalar, 6, 1> DegeneracyDetector::filterCorrection(
-    const Eigen::Matrix<Scalar, 6, 1>& correction_raw,
-    const DegeneracyResult& degeneracy) const {
-
-  if (!degeneracy.is_degenerate) {
-    return correction_raw;
-  }
-
-  // Build projection matrix: P = I − Σ v_i v_iᵀ for degenerate eigenvectors
-  Eigen::Matrix<Scalar, 6, 6> P = Eigen::Matrix<Scalar, 6, 6>::Identity();
-  for (int i = 0; i < 6; ++i) {
-    if (degeneracy.degenerate_directions[i] > 0.5) {
-      P -= degeneracy.degenerate_eigenvectors[i] *
-           degeneracy.degenerate_eigenvectors[i].transpose();
-    }
-  }
-
-  // Filtered correction: zero out components along degenerate directions
-  return P * correction_raw;
-}
-
-Eigen::Matrix<Scalar, 6, 1> DegeneracyDetector::fuseOdometryCorrection(
-    const Eigen::Matrix<Scalar, 6, 1>& correction_filtered,
-    const Eigen::Matrix<Scalar, 6, 1>& odom_displacement) const {
-
-  // The filtered correction has degenerate DoFs zeroed out.
-  // The odometry displacement provides the missing information.
-  // We fuse by adding the odom components that were zeroed out.
-  //
-  // correction_final = correction_filtered + (I − P) · odom_displacement
-  // where P is the same projection that filtered the LiDAR correction.
-
-  // For simplicity, we compute:
-  // correction_final = correction_filtered
-  // for each degenerate direction, replace with odom component
-  // (this relies on the calling code to pass the filtered correction)
-
-  // Actually we need to know which components were zeroed.
-  // For now, return the filtered + add odom for degenerate dims.
-  // The caller is responsible for ensuring the degenerate components
-  // are replaced by odometry.
-
-  return correction_filtered;  // caller fuses separately
-}
-
 }  // namespace m20::backend

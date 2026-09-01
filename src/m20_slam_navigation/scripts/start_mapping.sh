@@ -122,6 +122,12 @@ if ((${#running_slam_pids[@]} > 0)); then
   exit 1
 fi
 
+if pgrep -x slam_ddsnode >/dev/null 2>&1; then
+  printf 'The vendor slam_ddsnode is running; stop its mapping service before using the same topics and TF.\n' >&2
+  pgrep -af '(^|/)slam_ddsnode( |$)' >&2 || true
+  exit 1
+fi
+
 if [[ "${SKIP_BUILD}" != "true" ]] && {
   [[ "${FORCE_BUILD}" == "true" ]] ||
   [[ ! -f "${WORKSPACE}/install/m20_slam_navigation/share/m20_slam_navigation/package.sh" ]];
@@ -317,7 +323,7 @@ if [[ -z "${BAG_PATH}" ]]; then
   fi
 fi
 
-printf 'Starting isolated M20 mapping. Ctrl+C saves and exits.\n'
+printf 'Starting M20 mapping with the OEM topic/TF contract. Ctrl+C saves and exits.\n'
 LIDAR_TRANSPORT="drdds"
 IMU_TRANSPORT="drdds"
 MAX_LIDAR_QUEUE_SIZE="3"

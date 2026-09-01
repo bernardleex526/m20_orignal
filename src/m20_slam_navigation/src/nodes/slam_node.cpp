@@ -262,24 +262,24 @@ private:
     declare_parameter<std::string>("imu_topic", "/IMU");
     declare_parameter<std::string>("imu_transport", "ros2");
     declare_parameter<std::string>("drdds.imu_socket_path", "/tmp/m20_drdds_imu.sock");
-    declare_parameter<std::string>("output_odom_topic", "/m20_slam/SLAM_ODOM");
+    declare_parameter<std::string>("output_odom_topic", "/SLAM_ODOM");
     declare_parameter<std::string>(
-      "output_aligned_cloud_topic", "/m20_slam/SLAM_ALIGNED_POINTS");
+      "output_aligned_cloud_topic", "/SLAM_ALIGNED_POINTS");
     declare_parameter<std::string>(
-      "output_body_cloud_topic", "/m20_slam/SLAM_CLOUD_REGISTERED_BODY");
-    declare_parameter<std::string>("output_voxel_cloud_topic", "/m20_slam/DEPTH_POINTS");
-    declare_parameter<std::string>("output_depth_image_topic", "/m20_slam/DEPTH_IMAGE");
+      "output_body_cloud_topic", "/SLAM_CLOUD_REGISTERED_BODY");
+    declare_parameter<std::string>("output_voxel_cloud_topic", "/DEPTH_POINTS");
+    declare_parameter<std::string>("output_depth_image_topic", "/DEPTH_IMAGE");
     declare_parameter<std::string>(
-      "output_accumulated_map_cloud_topic", "/m20_slam/SLAM_ACCUMULATED_POINTS_MAP");
-    declare_parameter<std::string>("path_output_topic", "/m20_slam/path");
-    declare_parameter<bool>("use_vendor_topic_names", false);
-    declare_parameter<std::string>("map_frame", "m20_slam_map");
-    declare_parameter<std::string>("tracking_frame", "m20_slam_lidar");
+      "output_accumulated_map_cloud_topic", "/SLAM_ACCUMULATED_POINTS_MAP");
+    declare_parameter<std::string>("path_output_topic", "/path");
+    declare_parameter<bool>("use_vendor_topic_names", true);
+    declare_parameter<std::string>("map_frame", "camera_init");
+    declare_parameter<std::string>("tracking_frame", "base_link");
     declare_parameter<std::string>("body_frame", "base_link");
     declare_parameter<std::string>("map_save_path", "maps/m20_map/full_cloud.pcd");
     declare_parameter<bool>("lio.save_full_pcd", false);
     declare_parameter<std::string>(
-      "lio.full_map_save_path", "maps/m20_map/full_cloud.pcd");
+      "lio.full_map_save_path", "/var/opt/robot/data/maps/active/full_cloud.pcd");
     declare_parameter<bool>("publish_tf", true);
     declare_parameter<bool>("auto_save_on_shutdown", true);
     declare_parameter<double>("checkpoint_save_period_s", 10.0);
@@ -354,8 +354,8 @@ private:
 
     declare_parameter<bool>("height_map.enable", false);
     declare_parameter<int>("height_map.level", 4);
-    declare_parameter<std::string>("height_map.output.image_topic", "/m20_slam/HEIGHT_IMAGE");
-    declare_parameter<std::string>("height_map.output.cloud_topic", "/m20_slam/HEIGHT_POINTS");
+    declare_parameter<std::string>("height_map.output.image_topic", "/HEIGHT_IMAGE");
+    declare_parameter<std::string>("height_map.output.cloud_topic", "/HEIGHT_POINTS");
     declare_parameter<int>("height_map.output.frequency", 20);
     declare_parameter<double>("height_map.output.resolution", 0.04);
     declare_parameter<int>("height_map.output.size_x", 100);
@@ -372,6 +372,17 @@ private:
     declare_parameter<double>("occ_grid_2d.max_range", 30.0);
     declare_parameter<double>("occ_grid_2d.angle_increment", 0.006);
     declare_parameter<int>("occ_grid_2d.max_level", 8);
+
+    declare_parameter<std::vector<double>>(
+      "ght.extrinsic",
+      {-1.0, 0.0, 0.0, 0.16, 0.0, 0.0, -1.0, 0.0,
+        0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0});
+    declare_parameter<std::vector<double>>(
+      "ght.vio_default_cov", {0.001, 0.001, 0.001, 0.001, 0.001, 0.001});
+    declare_parameter<std::vector<double>>(
+      "ght.viro_default_cov", {0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001});
+    declare_parameter<std::vector<double>>(
+      "ght.rtk_default_cov", {0.00001, 0.00001, 0.00001, 0.00001, 0.00001, 0.00001});
 
     declare_parameter<std::vector<double>>(
       "pgo.prior_noise_sigmas", {1.0e6, 1.0e4, 0.001, 0.01, 0.01, 0.01});
@@ -657,7 +668,9 @@ private:
       "height_map.output.body_height", "occ_grid_2d.output_prefix",
       "occ_grid_2d.min_height", "occ_grid_2d.max_height", "occ_grid_2d.resolution",
       "occ_grid_2d.min_range", "occ_grid_2d.max_range", "occ_grid_2d.angle_increment",
-      "occ_grid_2d.max_level", "pgo.prior_noise_sigmas", "pgo.odom_noise_sigmas",
+      "occ_grid_2d.max_level", "ght.extrinsic", "ght.vio_default_cov",
+      "ght.viro_default_cov", "ght.rtk_default_cov", "pgo.prior_noise_sigmas",
+      "pgo.odom_noise_sigmas",
       "pgo.loop_noise_sigmas", "pgo.prior_noise_default_sigmas",
       "pgo.gps_noise_precision", "pgo.enable_imu_gravity", "pgo.imu_gravity_noise",
       "pgo.distance_threshold_factor", "pgo.segment_num", "pgo.keyframe_time"};
@@ -1566,9 +1579,9 @@ private:
   std::string body_cloud_topic_;
   std::string voxel_cloud_topic_;
   std::string map_cloud_topic_;
-  std::string depth_image_topic_{"/m20_slam/DEPTH_IMAGE"};
-  std::string height_image_topic_{"/m20_slam/HEIGHT_IMAGE"};
-  std::string height_cloud_topic_{"/m20_slam/HEIGHT_POINTS"};
+  std::string depth_image_topic_{"/DEPTH_IMAGE"};
+  std::string height_image_topic_{"/HEIGHT_IMAGE"};
+  std::string height_cloud_topic_{"/HEIGHT_POINTS"};
   std::string map_frame_;
   std::string tracking_frame_;
   std::string body_frame_;

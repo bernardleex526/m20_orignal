@@ -113,11 +113,20 @@ private:
                    int width, int height, Scalar resolution,
                    Scalar origin_x, Scalar origin_y) const;
 
+  /// Check the swept footprint between two poses at a bounded interval.
+  bool isSegmentCollisionFree(
+      Scalar x0, Scalar y0, Scalar theta0,
+      Scalar x1, Scalar y1, Scalar theta1,
+      const std::vector<uint8_t>& costmap,
+      int width, int height, Scalar resolution,
+      Scalar origin_x, Scalar origin_y) const;
+
   GlobalPlannerParams           planner_params_;
   TerrainParams                 terrain_params_;
   std::vector<MotionPrimitive>  primitives_;
   int                           num_heading_bins_;
   Scalar                        heading_bin_res_;  ///< radians per bin
+  Scalar                        state_grid_resolution_;  ///< resolution of the current costmap
 
   // Dijkstra heuristic lookup
   std::vector<Scalar>           dijkstra_costmap_;
@@ -126,6 +135,8 @@ private:
   Scalar                        dijkstra_resolution_{0};
   Scalar                        dijkstra_origin_x_{0};
   Scalar                        dijkstra_origin_y_{0};
+  Scalar                        dijkstra_goal_x_{0};
+  Scalar                        dijkstra_goal_y_{0};
 
   // Time limit tracking
   std::chrono::steady_clock::time_point search_start_;

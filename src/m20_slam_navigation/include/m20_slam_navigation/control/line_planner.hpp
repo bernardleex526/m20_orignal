@@ -26,6 +26,7 @@
 
 #include "m20_slam_navigation/common/types.hpp"
 #include "m20_slam_navigation/common/params.hpp"
+#include "m20_slam_navigation/control/dwa_planner.hpp"
 
 #include <Eigen/Dense>
 
@@ -36,6 +37,8 @@ namespace m20::control {
 class LinePlanner {
 public:
   LinePlanner(const LocalControllerParams& params);
+
+  void setParams(const LocalControllerParams& params) { params_ = params; }
 
   /**
    * @brief Check if the path ahead qualifies for LinePlanner mode.

@@ -18,6 +18,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 namespace m20::localization {
 
@@ -59,11 +60,17 @@ public:
   /// Get current pose estimate
   PoseWithCovariance getCurrentPose() const;
 
+  /// Full prior map for the native /FULL_CLOUD_MAP output contract.
+  pcl::PointCloud<pcl::PointXYZ>::Ptr getGlobalMap() const;
+
   /// Set relocalization callback
   void setRelocalizationCallback(RelocalizationCallback cb) { reloc_cb_ = std::move(cb); }
 
   /// Check if localized
   bool isLocalized() const { return localized_; }
+
+  /// Invalidate the current estimate so the next cloud uses a new initial pose.
+  void reset();
 
 private:
   LocalizationParams              loc_params_;
@@ -75,7 +82,9 @@ private:
   RelocalizationCallback          reloc_cb_;
   mutable std::mutex              mutex_;
   bool                            localized_{false};
-  SE3Pose                         last_ndt_pose_;  ///< for NDT initialization
+  std::optional<Timestamp>        last_imu_stamp_;
+  bool                            odom_alignment_initialized_{false};
+  SE3Pose                         world_odom_;
 };
 
 }  // namespace m20::localization

@@ -1,12 +1,14 @@
-# M20Pro SLAM 建图重建算法
+# M20Pro SLAM 建图与原厂导航合同适配
 
-本仓库提供一个面向 M20Pro 的 ROS 2 LiDAR-IMU 三维建图实现。它对原厂
-`slam_ddsnode` 的可观测输入、输出和参数进行行为重建，目标是让官方 ROS bag
-和 M20Pro 实时数据能够进入一条可复现、可测试、与原厂轨迹量纲接近的建图链路。
+本仓库提供一个面向 M20Pro 的 ROS 2 LiDAR-IMU 三维建图实现，并将
+`m20_orignal` 的导航数据链适配到原厂可观测的全局/局部规划合同。建图部分对原厂
+`slam_ddsnode` 做行为重建；导航部分接收原厂地图、里程计、目标和参数接口，使用
+Hybrid A* + cubic spline、DWA + LinePlanner 的对应实现，保持原厂参数名和话题名。
 
-> 重要边界：这是对闭源原厂算法的工程重建，不是原厂私有源码的 1:1 复制。当前
-> 支持范围是隔离三维建图；不会发布原厂 `/ODOM`、`/map`、`/cmd_vel`，也不接管
-> 导航系统的 `map -> odom -> base_link` TF。
+> 重要边界：这是对闭源原厂算法的工程重建，不是原厂私有源码的 1:1 复制。建图
+> 默认使用原厂话题和 TF 合同，启动前必须停掉原厂同名节点；导航适配器默认
+> `navigation.enable_motion_output=false`，不会
+> 因为启动节点而向机器人发运动指令，也不自动接管导航系统的 TF。
 
 ## 当前验证结果
 
@@ -17,11 +19,11 @@
 | LiDAR / IMU | 452 / 8301 | 452 / 8301 |
 | 成功 LIO 更新 | 440 | 441 |
 | 关键帧 | 49 | 52 |
-| 关键帧轨迹长度 | 35.5007 m | 36.8157 m |
-| 首尾误差 | 0.2689 m | 0.1986 m |
+| 关键帧轨迹长度 | 35.5007 m | 37.1787 m |
+| 首尾误差 | 0.2689 m | 0.0463 m |
 
-本实现产物位于 `maps/ab_repro_terminal_zero_20260828-20260828-155443/`。轨迹长度
-差异约 3.7%，首尾误差约 0.20 m。原厂基线来自 NOS 实机上的 ARM64/Foxy 闭源
+本次发布前复测产物位于本机忽略目录 `maps/review_release_20260831/`。轨迹长度
+差异约 4.7%，首尾误差约 0.05 m。原厂基线来自 NOS 实机上的 ARM64/Foxy 闭源
 `slam_ddsnode`；本仓库不能在 x86 主机上直接执行该二进制。
 
 ## 算法组成
@@ -102,6 +104,35 @@
 该策略用于消除末端漂移，能把官方 bag 的首尾误差从约 1.3 m 降到约 0.20 m；它
 是针对当前 M20Pro 回环场景的合理重建，并不代表已证明的原厂内部实现。
 
+## 原厂导航合同适配
+
+导航入口由 `navigation_system.launch.py` 加载
+`config/native_navigation.yaml`。适配链路为：
+
+```text
+/GRID_MAP + /ODOM + /goal_pose 或 /GOAL_GLOBAL
+    -> Hybrid A* + cubic spline
+    -> /path_Astar、/global_path、/local_goal
+
+/path_Astar + /NAV_POINTS + /ODOM 或 /MOTION_INFO
+    -> DWA / LinePlanner
+    -> /NAV_CMD、/PLANNER_STATUS
+```
+
+原厂参数快照和接口快照位于：
+
+- `config/native_navigation.yaml`：可直接加载的导航节点配置；
+- `config/native_global_planner.yaml`、`config/native_local_planner.yaml`：原厂全局/局部参数；
+- `config/native_passable_area.yaml`、`config/native_pcl_pass_grid.yaml`：地形和点云过滤参数；
+- `config/native_global_topics.yaml`、`config/native_lidar_params.yaml`、`config/native_body_params.yaml`：原厂接口和机体标定快照。
+
+安装了原厂 DrDDS SDK 的 M20Pro 构建会启用原生 `drdds/msg/*`、`drdds/srv/*` 桥接；
+x86 工作站没有该 SDK 时使用标准 ROS 消息回退，仅用于离线合同测试。原生 `/NAV_CMD`
+只有在显式打开 `navigation.enable_motion_output` 后才会写出。
+
+完整字段、类型、参数映射和验收边界见
+`docs/M20PRO_NATIVE_NAVIGATION_ADAPTATION.md`。
+
 ## M20Pro 输入契约
 
 | 接口 | 类型 | 典型频率 | 要求 |
@@ -132,18 +163,19 @@ shared memory=true
 
 ## 输出接口
 
-为避免与原厂节点争抢名称，默认使用 `/m20_slam/*` 隔离命名空间：
+默认输出与原厂合同同名，因此本节点和原厂 `slam_ddsnode` 不能同时运行：
 
 | 输出 | 类型 |
 |---|---|
-| `/m20_slam/SLAM_ODOM` | `nav_msgs/msg/Odometry` |
-| `/m20_slam/SLAM_ALIGNED_POINTS` | `sensor_msgs/msg/PointCloud2` |
-| `/m20_slam/SLAM_CLOUD_REGISTERED_BODY` | `sensor_msgs/msg/PointCloud2` |
-| `/m20_slam/DEPTH_POINTS` | `sensor_msgs/msg/PointCloud2` |
-| `/m20_slam/SLAM_ACCUMULATED_POINTS_MAP` | `sensor_msgs/msg/PointCloud2` |
-| `/m20_slam/path` | `nav_msgs/msg/Path` |
+| `/SLAM_ODOM` | `nav_msgs/msg/Odometry` |
+| `/SLAM_ALIGNED_POINTS` | `sensor_msgs/msg/PointCloud2` |
+| `/SLAM_CLOUD_REGISTERED_BODY` | `sensor_msgs/msg/PointCloud2` |
+| `/DEPTH_POINTS` | `sensor_msgs/msg/PointCloud2` |
+| `/DEPTH_IMAGE` | `sensor_msgs/msg/Image` |
+| `/SLAM_ACCUMULATED_POINTS_MAP` | `sensor_msgs/msg/PointCloud2` |
+| `/path` | `nav_msgs/msg/Path` |
 | `/m20_slam/save_map` | `std_srvs/srv/Trigger` |
-| `m20_slam_map -> m20_slam_lidar` | isolated TF |
+| `camera_init -> base_link` | 动态 TF |
 
 地图目录通常包含：
 
@@ -187,7 +219,7 @@ cd ~/m20_orignal
 source /opt/ros/humble/setup.bash
 cd ~/m20_orignal
 colcon build --symlink-install --packages-select m20_slam_navigation \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_EXPERIMENTAL_NAVIGATION=OFF
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_EXPERIMENTAL_NAVIGATION=ON
 source install/setup.bash
 ```
 
@@ -197,8 +229,20 @@ source install/setup.bash
 ctest --test-dir build/m20_slam_navigation --output-on-failure
 ```
 
-当前测试为 5/5 通过，覆盖消息适配、传感器线协议、ESKF、输出契约以及 GHT/PGO
-几何模型。
+当前测试为 7/7 测试目标、37 个测试通过，覆盖原厂导航话题/参数、运动原语、
+Hybrid A*、LinePlanner、地形回退和定位 ESKF 合同。
+
+### 已有地图的定位与导航联调
+
+```bash
+ros2 launch m20_slam_navigation m20_full_system.launch.py \
+  map_path:=/absolute/path/to/full_cloud.pcd \
+  use_rviz:=true \
+  enable_motion_output:=false
+```
+
+该完整启动文件运行“定位 + 导航”，不同时启动建图。建图和定位不能共同拥有
+`camera_init` 位姿链；真实运动输出必须经过单独实机验收后显式开启。
 
 ## 关键参数
 
@@ -226,8 +270,11 @@ backend.loop_min_submap_overlap 0.65
 
 - 原厂 `slam_ddsnode` 和本实现不能同时占用同一套输入/输出资源；A/B 测试前先停止
   原厂建图服务。
-- 当前流程只做 mapping-only 验证，不启动 Nav2、`cmd_vel`、motion bridge，也不重启
-  原厂 AOS/NOS 服务。
+- `start_mapping.sh` 仍只做 mapping-only 验证，不自动启动导航、Nav2、`cmd_vel`、
+  motion bridge，也不重启原厂 AOS/NOS 服务；导航需要单独运行
+  `navigation_system.launch.py`。
+- 导航适配器默认只计算和发布规划/诊断结果；必须单独审核后才能打开运动输出，并
+  在同一台 M20Pro 上确认原厂运动控制器的消费话题与 DDS QoS。
 - 官方 bag 通过不等于真实设备已验收；真实部署还必须检查时间同步、外参、TF、物理
   尺度、长时间运行、地图质量和下游消费接口。
 - 实时替换原厂前，建议先完成同一 M20Pro 设备上的重复 mapping-only 回放和现场建图

@@ -153,11 +153,7 @@ ScanContextDescriptor LoopClosureDetector::buildDescriptor(
   ScanContextDescriptor desc;
   desc.frame_id = frame_id;
   desc.pose = pose;
-  desc.cloud.reset(new pcl::PointCloud<pcl::PointXYZI>());
-  desc.data.setZero();
-  desc.ring_key.setZero();
-
-  if (cloud->empty()) return desc;
+  if (!cloud || cloud->empty()) return desc;
 
   // Loop detection must never stall the LIO input path with a full-resolution
   // keyframe. A 0.30 m cloud preserves office-scale geometry while reducing

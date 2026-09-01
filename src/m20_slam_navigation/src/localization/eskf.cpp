@@ -5,6 +5,39 @@
 
 namespace m20::localization {
 
+namespace {
+
+Eigen::Matrix<Scalar, 6, 1> poseInnovation(
+    const ESKFState& state, const SE3Pose& measured) {
+  Eigen::Matrix<Scalar, 6, 1> innovation;
+  innovation.head<3>() = measured.t - state.p;
+  const Eigen::Quaternion<Scalar> delta_q = state.q.conjugate() * measured.q;
+  innovation.tail<3>() = math::so3_log(delta_q.normalized().toRotationMatrix());
+  return innovation;
+}
+
+void applyPoseUpdate(
+    ESKFState& state,
+    Eigen::Matrix<Scalar, 15, 1>& error_state,
+    const Eigen::Matrix<Scalar, 6, 1>& innovation,
+    const Eigen::Matrix<Scalar, 6, 6>& covariance) {
+  Eigen::Matrix<Scalar, 6, 15> H = Eigen::Matrix<Scalar, 6, 15>::Zero();
+  H.block<3, 3>(0, 0).setIdentity();
+  H.block<3, 3>(3, 3).setIdentity();
+
+  const Eigen::Matrix<Scalar, 6, 6> S = H * state.P * H.transpose() + covariance;
+  const Eigen::Matrix<Scalar, 15, 6> K =
+      state.P * H.transpose() * S.ldlt().solve(Eigen::Matrix<Scalar, 6, 6>::Identity());
+  error_state += K * innovation;
+
+  const Eigen::Matrix<Scalar, 15, 15> I =
+      Eigen::Matrix<Scalar, 15, 15>::Identity();
+  const Eigen::Matrix<Scalar, 15, 15> IKH = I - K * H;
+  state.P = IKH * state.P * IKH.transpose() + K * covariance * K.transpose();
+}
+
+}  // namespace
+
 ESKF::ESKF(const LocalizationParams& params) : params_(params) {}
 
 void ESKF::initialize(const SE3Pose& initial_pose,
@@ -47,10 +80,13 @@ void ESKF::predict(const Eigen::Matrix<Scalar, 3, 1>& accel,
 
   // Velocity: v ← v + (R·a + g_world)·dt
   Eigen::Matrix<Scalar, 3, 1> a_world = state_.q._transformVector(a);
-  state_.v += (a_world + ESKFState::GRAVITY) * dt;
+  const Eigen::Matrix<Scalar, 3, 1> gravity_world(
+      0.0, 0.0, -std::abs(params_.imu_gravity));
+  const Eigen::Matrix<Scalar, 3, 1> acceleration_world = a_world + gravity_world;
 
-  // Position: p ← p + v·dt + ½(R·a + g_world)·dt²
-  state_.p += state_.v * dt + 0.5 * (a_world + ESKFState::GRAVITY) * dt * dt;
+  // Integrate position with the velocity at the beginning of the interval.
+  state_.p += state_.v * dt + 0.5 * acceleration_world * dt * dt;
+  state_.v += acceleration_world * dt;
 
   // ---- Error state propagation (linear) ----
   // Compute transition matrix A (15×15)
@@ -80,36 +116,7 @@ void ESKF::updateNDT(const SE3Pose& T_measured,
 
   if (!initialized_) return;
 
-  // ---- Compute predicted measurement h(x_nom) ----
-  // For pose measurement, the residual is the SE(3) difference in local coordinates:
-  //   z = h(x) ⊞ v = log(T_nom⁻¹ ∘ T_measured)  (6×1 twist)
-  SE3Pose T_nom(state_.q, state_.p);
-  SE3Pose delta_T = T_nom.inverse() * T_measured;
-  Eigen::Matrix<Scalar, 6, 1> innovation = delta_T.log();
-
-  // ---- Observation Jacobian H (6×15) ----
-  // For NDT pose observation: H = [I₆ | 0₆ₓ₉]
-  Eigen::Matrix<Scalar, 6, 15> H = Eigen::Matrix<Scalar, 6, 15>::Zero();
-  H.block<6, 6>(0, 0) = Eigen::Matrix<Scalar, 6, 6>::Identity();
-
-  // ---- Measurement noise R ----
-  Eigen::Matrix<Scalar, 6, 6> R = covariance;
-
-  // ---- Kalman update ----
-  // S = H·P·Hᵀ + R
-  Eigen::Matrix<Scalar, 6, 6> S = H * state_.P * H.transpose() + R;
-
-  // K = P·Hᵀ·S⁻¹
-  Eigen::Matrix<Scalar, 15, 6> K = state_.P * H.transpose() * S.inverse();
-
-  // δx = K·(z − h(x))
-  Eigen::Matrix<Scalar, 15, 1> dx = K * innovation;
-
-  // ---- Update error state ----
-  error_state_ += dx;
-
-  // P = (I − K·H)·P
-  state_.P = (Eigen::Matrix<Scalar, 15, 15>::Identity() - K * H) * state_.P;
+  applyPoseUpdate(state_, error_state_, poseInnovation(state_, T_measured), covariance);
 }
 
 void ESKF::updateOdometry(const SE3Pose& T_measured,
@@ -117,20 +124,7 @@ void ESKF::updateOdometry(const SE3Pose& T_measured,
 
   if (!initialized_) return;
 
-  // Same formulation as NDT update but with different noise
-  SE3Pose T_nom(state_.q, state_.p);
-  SE3Pose delta_T = T_nom.inverse() * T_measured;
-  Eigen::Matrix<Scalar, 6, 1> innovation = delta_T.log();
-
-  Eigen::Matrix<Scalar, 6, 15> H = Eigen::Matrix<Scalar, 6, 15>::Zero();
-  H.block<6, 6>(0, 0) = Eigen::Matrix<Scalar, 6, 6>::Identity();
-
-  Eigen::Matrix<Scalar, 6, 6> S = H * state_.P * H.transpose() + covariance;
-  Eigen::Matrix<Scalar, 15, 6> K = state_.P * H.transpose() * S.inverse();
-  Eigen::Matrix<Scalar, 15, 1> dx = K * innovation;
-
-  error_state_ += dx;
-  state_.P = (Eigen::Matrix<Scalar, 15, 15>::Identity() - K * H) * state_.P;
+  applyPoseUpdate(state_, error_state_, poseInnovation(state_, T_measured), covariance);
 }
 
 void ESKF::injectErrorAndReset() {

@@ -40,7 +40,8 @@ public:
       int num_angles = 8,
       Scalar primitive_len = 0.3,
       Scalar max_curvature = 0.5,
-      int num_rotations = 3);
+      int num_rotations = 3,
+      Scalar max_heading_change = -1.0);
 
   /**
    * @brief Generate rotation-in-place primitives.

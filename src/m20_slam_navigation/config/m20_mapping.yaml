@@ -13,29 +13,27 @@ slam_node:
     drdds.socket_path: /tmp/m20_drdds_lidar.sock
     drdds.imu_socket_path: /tmp/m20_drdds_imu.sock
 
-    # Vendor channel semantics with an isolation prefix.  Remove /m20_slam
-    # only when the native mapping service is stopped and exact names are
-    # intentionally required.
-    output_odom_topic: /m20_slam/SLAM_ODOM
-    output_aligned_cloud_topic: /m20_slam/SLAM_ALIGNED_POINTS
+    # Exact deployed mapping output contract. Stop the vendor slam_ddsnode
+    # before starting this adapter to avoid duplicate publishers and TF owners.
+    output_odom_topic: /SLAM_ODOM
+    output_aligned_cloud_topic: /SLAM_ALIGNED_POINTS
     # The vendor binary publishes this additional body-frame channel even
     # though it is not listed in node.output_* in params.yaml.
-    output_body_cloud_topic: /m20_slam/SLAM_CLOUD_REGISTERED_BODY
-    output_voxel_cloud_topic: /m20_slam/DEPTH_POINTS
-    output_depth_image_topic: /m20_slam/DEPTH_IMAGE
-    output_accumulated_map_cloud_topic: /m20_slam/SLAM_ACCUMULATED_POINTS_MAP
-    # Set true only for an A/B run after the native publisher is stopped.
-    use_vendor_topic_names: false
+    output_body_cloud_topic: /SLAM_CLOUD_REGISTERED_BODY
+    output_voxel_cloud_topic: /DEPTH_POINTS
+    output_depth_image_topic: /DEPTH_IMAGE
+    output_accumulated_map_cloud_topic: /SLAM_ACCUMULATED_POINTS_MAP
+    use_vendor_topic_names: true
     lidar_type: 1
     lidar_use_system_time: false
     imu_use_system_time: false
-    path_output_topic: /m20_slam/path
-    map_frame: m20_slam_map
-    tracking_frame: m20_slam_lidar
+    path_output_topic: /path
+    map_frame: camera_init
+    tracking_frame: base_link
     body_frame: base_link
     publish_tf: true
 
-    map_save_path: maps/m20_map/full_cloud.pcd
+    map_save_path: /var/opt/robot/data/maps/active/full_cloud.pcd
     auto_save_on_shutdown: true
     checkpoint_save_period_s: 10.0
     publish_map_every_n_keyframes: 5
@@ -86,8 +84,7 @@ slam_node:
     lio.b_acc_cov: 0.001
     lio.b_gyr_cov: 0.001
     lio.save_full_pcd: false
-    # Isolated equivalent of the native /var/opt/robot/data/maps/active path.
-    lio.full_map_save_path: maps/m20_map/full_cloud.pcd
+    lio.full_map_save_path: /var/opt/robot/data/maps/active/full_cloud.pcd
 
     # Vendor accumulated_points contract. The native configuration disables
     # this callback by default; when enabled it publishes a robot-local crop in
@@ -116,8 +113,8 @@ slam_node:
 
     height_map.enable: false
     height_map.level: 4
-    height_map.output.image_topic: /m20_slam/HEIGHT_IMAGE
-    height_map.output.cloud_topic: /m20_slam/HEIGHT_POINTS
+    height_map.output.image_topic: /HEIGHT_IMAGE
+    height_map.output.cloud_topic: /HEIGHT_POINTS
     height_map.output.frequency: 20
     height_map.output.resolution: 0.04
     height_map.output.size_x: 100
@@ -134,6 +131,15 @@ slam_node:
     occ_grid_2d.max_range: 30.0
     occ_grid_2d.angle_increment: 0.006
     occ_grid_2d.max_level: 8
+
+    ght.extrinsic: [-1.0, 0.0, 0.0, 0.16,
+                    0.0, 0.0, -1.0, 0.0,
+                    0.0, -1.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0]
+    ght.vio_default_cov: [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]
+    ght.viro_default_cov: [0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001]
+    ght.rtk_default_cov: [0.00001, 0.00001, 0.00001,
+                          0.00001, 0.00001, 0.00001]
 
     pgo.prior_noise_sigmas: [1.0e6, 1.0e4, 0.001, 0.01, 0.01, 0.01]
     pgo.odom_noise_sigmas: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]

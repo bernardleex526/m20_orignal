@@ -15,49 +15,52 @@ Visualization Manager:
       Plane: XY
       Reference Frame: <Fixed Frame>
     - Alpha: 1
-      Autocompute Intensity Bounds: true
-      Channel Name: intensity
       Class: rviz_default_plugins/PointCloud2
-      Color Transformer: Intensity
+      Color: 190; 190; 190
+      Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
-      Name: M20 Map Cloud
+      Name: Prior Map
       Position Transformer: XYZ
-      Queue Size: 10
+      Queue Size: 2
       Selectable: true
       Size (Pixels): 2
       Size (m): 0.03
       Style: Points
       Topic:
-        Depth: 5
+        Depth: 1
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /SLAM_ACCUMULATED_POINTS_MAP
+        Value: /FULL_CLOUD_MAP
       Use Fixed Frame: true
-    - Alpha: 1
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 25; 255; 0
+    - Alpha: 0.7
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: true
       Enabled: true
-      Head Diameter: 0.3
-      Head Length: 0.2
-      Length: 0.3
-      Line Style: Lines
-      Line Width: 0.03
-      Name: M20 Path
-      Offset: 0; 0; 0
-      Pose Color: 255; 85; 255
-      Pose Style: None
-      Radius: 0.03
-      Shaft Diameter: 0.1
-      Shaft Length: 0.1
+      Name: Local Costmap
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /path
+        Value: /local_map
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 25; 255; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.03
+      Name: Global Path
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /path_Astar
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -69,6 +72,10 @@ Visualization Manager:
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic: /goal_pose
   Transformation:
     Current:
       Class: rviz_default_plugins/TF

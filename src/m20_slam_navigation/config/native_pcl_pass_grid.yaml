@@ -1,0 +1,16 @@
+# Snapshot of /opt/robot/share/planner/config/pcl_pass_grid.yaml.
+out_minx: -4.0
+out_maxx: 4.0
+out_miny: -4.0
+out_maxy: 4.0
+out_minz: -0.30
+out_maxz: 0.6
+in_minx: -0.45
+in_maxx: 0.45
+in_miny: -0.25
+in_maxy: 0.25
+in_minz: -0.30
+in_maxz: 0.6
+serach_radius: 0.1
+minNeighbors: 4
+leaf_size: 0.01

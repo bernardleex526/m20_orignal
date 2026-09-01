@@ -8,6 +8,7 @@
  */
 
 #include "m20_slam_navigation/common/types.hpp"
+#include "m20_slam_navigation/common/native_navigation.hpp"
 
 #include <array>
 #include <cstddef>
@@ -155,6 +156,32 @@ struct LocalizationParams {
   Scalar eskf_ndt_pos_noise{0.1};             ///< observation noise for NDT position
   Scalar eskf_ndt_rot_noise{0.05};            ///< observation noise for NDT rotation
   Scalar eskf_odom_pos_noise{0.02};           ///< observation noise for foot odometry
+  Scalar imu_gravity{9.80511};                 ///< native localization gravity magnitude
+};
+
+/** Observable topic contract of the native M20Pro localization service. */
+struct LocalizationTopics {
+  std::string input_lidar{"/LIDAR/POINTS"};
+  std::string input_imu{"/IMU"};
+  std::string input_rtk{"/GPYBM"};
+  std::string leg_odom{"/leg_odom"};
+  std::string initial_pose{"/initialpose"};
+  std::string output_odom{"/ODOM"};
+  std::string output_enu{"/RTK_RAW_ODOM"};
+  std::string output_global_map{"/FULL_CLOUD_MAP"};
+  std::string output_body_cloud{"/LOC_BODY_POINTS"};
+};
+
+/** Frames and switches used by the native localization contract adapter. */
+struct LocalizationRuntimeParams {
+  LocalizationTopics topics;
+  std::string world_frame{"camera_init"};
+  std::string map_frame{"map"};
+  std::string odom_frame{"odom"};
+  std::string body_frame{"base_link"};
+  std::string lidar_frame{"lidar_link"};
+  std::string imu_frame{"imu_link"};
+  bool publish_world_to_odom_tf{true};
 };
 
 // =============================================================================
@@ -162,6 +189,85 @@ struct LocalizationParams {
 // =============================================================================
 struct TerrainParams {
   Scalar grid_resolution{0.05};               ///< [m] elevation grid cell size
+  // Native passable_area map geometry.
+  Scalar map_length{8.0};                      ///< [m] native rolling map length
+  Scalar map_width{8.0};                       ///< [m] native rolling map width
+  Scalar map_height_min{-1.0};
+  Scalar map_height_max{0.8};
+  Scalar voxel_size{0.05};
+  Scalar max_drop{0.25};
+  Scalar max_roughness{0.10};
+  Scalar max_slope_deg{89.0};
+  int    max_inpaint_pixels{200};
+  bool   enable_center_padding{true};
+  Scalar center_dist_thresh{0.8};
+  bool   enable_blind_check{false};
+  bool   treat_nan_as_stiff{true};
+
+  // Native passable_area topic/frame contract.
+  std::string accumulate_cloud_topic{native::kAccumulatedCloudTopic};
+  std::string imu_topic{native::kImuTopic};
+  std::string passable_cloud_topic{native::kPassableCloudTopic};
+  std::string impassable_cloud_topic{native::kImpassableCloudTopic};
+  std::string grid_map_topic{native::kGridMapLowerTopic};
+  std::string traversal_cost_topic{native::kTraversalCostTopic};
+  std::string world_frame{"camera_init"};
+  std::string gravity_frame{"base_gravity"};
+  std::string body_frame{"base_link"};
+  std::string used_frame{"base_gravity"};
+  std::string dog_model{"m20"};
+
+  // Native raycast/elevation options.
+  bool   raycast_enable{true};
+  Scalar raycast_max_ray_distance{4.0};
+  Scalar raycast_max_nan_gap{3.0};
+  bool   elevation_use_histogram_solver{false};
+  int    elevation_histogram_bins{20};
+  bool   elevation_region_enabled{true};
+  Scalar elevation_region_min_x{-3.0};
+  Scalar elevation_region_max_x{3.0};
+  Scalar elevation_region_min_y{-1.0};
+  Scalar elevation_region_max_y{1.0};
+
+  // Native planner pcl_pass_grid.yaml.  These values are applied to the
+  // /NAV_POINTS fallback before terrain analysis; /GRID_MAP remains the
+  // authoritative native global-planner input when it is available.
+  Scalar pass_grid_out_min_x{-4.0};
+  Scalar pass_grid_out_max_x{4.0};
+  Scalar pass_grid_out_min_y{-4.0};
+  Scalar pass_grid_out_max_y{4.0};
+  Scalar pass_grid_out_min_z{-0.30};
+  Scalar pass_grid_out_max_z{0.6};
+  Scalar pass_grid_in_min_x{-0.45};
+  Scalar pass_grid_in_max_x{0.45};
+  Scalar pass_grid_in_min_y{-0.25};
+  Scalar pass_grid_in_max_y{0.25};
+  Scalar pass_grid_in_min_z{-0.30};
+  Scalar pass_grid_in_max_z{0.6};
+  Scalar pass_grid_search_radius{0.1};
+  int    pass_grid_min_neighbors{4};
+  Scalar pass_grid_leaf_size{0.01};
+
+  // Native traversal-cost options.
+  bool   traversal_cost_enable{true};
+  Scalar traversal_slope_free_deg{10.0};
+  Scalar traversal_slope_block_deg{80.0};
+  Scalar traversal_rough_free{0.01};
+  Scalar traversal_rough_block{0.04};
+  Scalar traversal_step_free{0.08};
+  Scalar traversal_step_block{0.35};
+  Scalar traversal_slope_weight{0.3};
+  Scalar traversal_roughness_weight{0.3};
+  Scalar traversal_step_weight{0.4};
+  Scalar traversal_easy_cost{0.0};
+  Scalar traversal_hard_cost{90.0};
+  Scalar traversal_max_cost{100.0};
+  Scalar traversal_missing_cost{20.0};
+  Scalar traversal_curve_power{1.0};
+  Scalar traversal_low_cost_filter_ratio{0.1};
+  int    traversal_terrain_sample_window{1};
+  Scalar traversal_safe_zone_side_length{0.6};
+
   Scalar max_range{30.0};                     ///< [m] max LiDAR range for terrain
   Scalar min_range{0.3};                      ///< [m] min range (self-filter)
 
@@ -178,10 +284,6 @@ struct TerrainParams {
   Scalar max_step_depth{0.15};                ///< [m] max traversable negative step
   Scalar step_weight{1.5};
 
-  // Occlusion / ray visibility
-  bool   enable_occlusion_check{true};
-  Scalar occlusion_weight{0.5};
-
   // Slope estimation via PCA: radius for neighbour search
   Scalar normal_estimation_radius{0.2};       ///< [m]
 };
@@ -191,6 +293,44 @@ struct TerrainParams {
 // =============================================================================
 struct GlobalPlannerParams {
   Scalar grid_resolution{0.1};                ///< [m] planning grid cell size
+
+  // Native HybridAstar cost and search model.
+  Scalar weight_a{1.0};
+  Scalar weight_b{1.3};
+  Scalar weight_heading{0.8};
+  Scalar cost_steer{1.0};
+  Scalar cost_steerchange{0.2};
+  Scalar cost_gear{2.0};
+  Scalar cost_backward{1.5};
+  Scalar cost_reduce{0.85};
+  Scalar step_size{0.4};
+  Scalar sample_interval{0.2};
+  Scalar body_length{0.45};
+  Scalar body_width{0.45};
+  Scalar max_steer{0.9};
+  int    num_steerind{3};
+  int    num_directions{8};
+  int    num_rotations{3};
+  Scalar goal_dis{0.5};
+  bool   dynamic_update{false};
+  bool   test_mode{false};
+  Scalar xy_tolerance{0.5};
+  Scalar dynamic_map_size{3.0};
+  int    dynamic_map_grid{30};
+  Scalar astar_time{1.0};
+  int    debug_point_num{7};
+  bool   enable_smoothing{true};
+  int    smooth_count{7};
+  int    smooth_degree{3};
+  int    num_samples{7};
+  Scalar angle_threshold_deg{60.0};
+  Scalar local_goal_freq_hz{10.0};
+  Scalar max_trajectory_range{2.0};
+  Scalar local_point_dis{0.0};
+  Scalar local_point_dis_v_max{0.0};
+  Scalar native_max_speed_x{1.0};
+  Scalar sharp_turn_angle_deg{45.0};
+  int    local_goal_search_window{10};
 
   // Motion primitives (omnidirectional)
   int    num_heading_bins{72};                ///< discretized headings (72 → 5° bins)
@@ -210,6 +350,79 @@ struct GlobalPlannerParams {
 // Local Planner/Controller (DWA) parameters
 // =============================================================================
 struct LocalControllerParams {
+  // Native localPlanner parameter names and behavior.
+  Scalar look_ahead_dis{1.5};
+  Scalar native_max_speed_x{1.5};
+  Scalar native_max_speed_y{0.6};
+  Scalar native_max_theta{1.0};
+  Scalar barking_deceleration{1.0};
+  Scalar stop_distance{0.7};
+  Scalar max_v_threshold{1.2};
+  Scalar robot_length{0.84};
+  Scalar robot_width{0.5};
+  Scalar sensor_offset_x{0.0};
+  Scalar sensor_offset_y{0.0};
+  Scalar obstacle_height_threshold{0.10};
+  Scalar goal_in_obstacle_distance{0.25};
+  Scalar goal_in_obstacle_z{0.5};
+  int    point_per_path_threshold{1};
+  std::string input_source{native::kNavPointsTopic};
+  Scalar grid_size{0.05};
+  int    grid_occupied_number{2};
+  bool   enable_cloud_stacking{false};
+  int    cloud_stack_size{1};
+  bool   direct_line_mode{true};
+  bool   judge_close{false};
+  bool   change_close{true};
+  bool   backward_mode{false};
+  bool   judge_turn{false};
+  Scalar xy_tolerance{0.1};
+  Scalar yaw_tolerance{0.1};
+  int    block_number{1};
+  Scalar dwa_fine_tune_distance{0.5};
+  Scalar weight_goal{1.0};
+  Scalar weight_yaw{0.5};
+  Scalar weight_spdy{0.2};
+  Scalar weight_ob1{0.6};
+  Scalar weight_ob2{0.8};
+  Scalar weight_ob3{1.0};
+  Scalar local_point_dis{3.0};
+  Scalar local_point_dis_v_max{5.0};
+  bool   local_try{true};
+  int    path_num{4641};
+  int    path_sample_num{10};
+  Scalar grid_voxel_size{0.05};
+  Scalar grid_voxel_offset_x{-1.475};
+  Scalar grid_voxel_offset_y{-1.975};
+  int    grid_voxel_num_x{90};
+  int    grid_voxel_num_y{80};
+  Scalar turn_yaw_kp{1.5};
+  Scalar angle_threshold_deg{30.0};
+  Scalar sum_angle_threshold_deg{75.0};
+  Scalar min_segment_length{0.02};
+  Scalar track_distance{1.5};
+  Scalar speed_ratio{1.0};
+  Scalar speed_ratio_yaw{1.0};
+  Scalar dl_min_yaw{0.7};
+  Scalar dl_min_x{0.25};
+  Scalar dl_min_y{0.25};
+  Scalar pl_min_yaw{0.25};
+  Scalar pl_min_x{0.25};
+  Scalar pl_min_y{0.25};
+  Scalar dl_line_yaw_min{0.2};
+  Scalar close_deceleration{1.0};
+  Scalar proximity_distance{0.5};
+  Scalar warning_threshold{10.0};
+  Scalar velocity_accel_threshold{1.0};
+  Scalar x_acc_increment{0.05};
+  int    count_num{10};
+  Scalar only_rotate_yaw{0.35};
+  Scalar adjust_yaw_min{1.0};
+  Scalar rotate_detect_dis{0.0};
+  Scalar turn_approach_threshold{0.2};
+  Scalar monitor_loop_frequency{10.0};
+  Scalar sharp_turn_angle_deg{60.0};
+
   // Velocity space
   Scalar max_linear_vel_x{1.0};              ///< [m/s] max forward
   Scalar max_linear_vel_y{0.5};              ///< [m/s] max lateral (omnidirectional)
@@ -235,6 +448,54 @@ struct LocalControllerParams {
   // LinePlanner mode
   Scalar lineplanner_lateral_gain{0.5};      ///< P gain for lateral drift compensation
   Scalar lineplanner_yaw_threshold{0.1};     ///< [rad] threshold to switch to DWA
+};
+
+/** ROS topic names used by the native navigation graph. */
+struct NavigationTopics {
+  std::string grid_map{native::kGridMapTopic};
+  std::string initial_pose{native::kInitialPoseTopic};
+  std::string goal_pose{native::kGoalPoseTopic};
+  std::string goal_global_service{native::kGoalGlobalService};
+  std::string odom{native::kOdomTopic};
+  std::string motion_info{native::kMotionInfoTopic};
+  std::string nav_points{native::kNavPointsTopic};
+  std::string cancel_nav{native::kCancelNavTopic};
+  std::string cancel_global_service{native::kCancelGlobalService};
+  std::string planner_mode{native::kPlannerModeTopic};
+  std::string astar_path{native::kAstarPathTopic};
+  std::string visible_points{native::kVisiblePointsTopic};
+  std::string pruned_visible_points{native::kPrunedVisiblePointsTopic};
+  std::string local_goal{native::kLocalGoalTopic};
+  std::string local_map{native::kLocalMapTopic};
+  std::string global_planner_status{native::kGlobalPlannerStatusTopic};
+  std::string nav_cmd{native::kNavCmdTopic};
+  std::string planner_status{native::kPlannerStatusTopic};
+  std::string target_goal{native::kTargetGoalTopic};
+  std::string goal_baselink{native::kGoalBaseLinkTopic};
+  std::string local_goal_baselink{native::kLocalGoalBaseLinkTopic};
+  std::string free_paths{native::kFreePathsTopic};
+  std::string local_path{native::kLocalPathTopic};
+  std::string local_scans{native::kLocalScansTopic};
+  std::string track_path_baselink{native::kTrackPathBaseLinkTopic};
+  std::string global_path{native::kGlobalPathTopic};
+  std::string grid_map_3d{native::kGridMap3DTopic};
+  std::string global_path_markers{native::kGlobalPathMarkersTopic};
+  std::string set_param_service{native::kSetParamService};
+  std::string cancel_planner_service{native::kCancelPlannerService};
+  std::string goal_planner_service{native::kGoalPlannerService};
+};
+
+/** Node-level switches which keep navigation observable without enabling motion. */
+struct NavigationRuntimeParams {
+  NavigationTopics topics;
+  std::string world_frame{"camera_init"};
+  std::string body_frame{"base_link"};
+  bool enable_motion_output{false};
+  bool use_native_dds{true};
+  int dds_domain_id{0};
+  bool dds_use_shm{false};
+  std::string dds_topic_prefix{"rt"};
+  std::string dds_network_name;
 };
 
 }  // namespace m20

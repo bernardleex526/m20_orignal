@@ -1,4 +1,5 @@
 #include "m20_slam_navigation/control/local_controller_node.hpp"
+#include "m20_slam_navigation/common/math_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -23,8 +24,38 @@ VelocityCommand LocalControllerNode::step(
 
   VelocityCommand cmd;
 
+  if (canceled_ || global_path.empty()) {
+    current_mode_ = Mode::DWA;
+    if (vel_cb_) vel_cb_(cmd);
+    return cmd;
+  }
+
+  const auto& final_goal = global_path.back();
+  const Scalar goal_distance = std::hypot(
+      current_pose.x() - final_goal.x(), current_pose.y() - final_goal.y());
+  if (goal_distance <= params_.stop_distance) {
+    const Scalar yaw_error = math::normalize_angle(final_goal.z() - current_pose.z());
+    if (std::abs(yaw_error) > params_.yaw_tolerance) {
+      current_mode_ = Mode::DWA;
+      cmd.omega = std::clamp(
+          params_.turn_yaw_kp * yaw_error,
+          -params_.native_max_theta, params_.native_max_theta);
+    } else {
+      current_mode_ = Mode::DWA;
+    }
+    if (vel_cb_) vel_cb_(cmd);
+    return cmd;
+  }
+
+  const bool force_line = requested_mode_ == 1;
+  const bool force_dwa = requested_mode_ == 2;
+  const bool line_mode = !force_dwa &&
+      (force_line || (params_.direct_line_mode &&
+                      line_planner_->isLineMode(
+                          global_path, current_pose, params_.look_ahead_dis)));
+
   // Check if LinePlanner mode applies
-  if (line_planner_->isLineMode(global_path, current_pose)) {
+  if (line_mode) {
     current_mode_ = Mode::LINE;
 
     // Extract the line segment ahead
@@ -45,7 +76,7 @@ VelocityCommand LocalControllerNode::step(
       }
 
       cmd = line_planner_->computeLineCommand(
-          current_pose, line_start, line_end, params_.max_linear_vel_x);
+          current_pose, line_start, line_end, params_.native_max_speed_x);
     } else {
       // Fall through to DWA
       current_mode_ = Mode::DWA;
@@ -73,6 +104,22 @@ void LocalControllerNode::setParams(const LocalControllerParams& params) {
   std::lock_guard<std::mutex> lock(mutex_);
   params_ = params;
   dwa_planner_->setParams(params);
+  line_planner_->setParams(params);
+}
+
+void LocalControllerNode::setPlannerMode(int mode) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  requested_mode_ = mode;
+}
+
+void LocalControllerNode::cancel() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  canceled_ = true;
+}
+
+void LocalControllerNode::resume() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  canceled_ = false;
 }
 
 }  // namespace m20::control

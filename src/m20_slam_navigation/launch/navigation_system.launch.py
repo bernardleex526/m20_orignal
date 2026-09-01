@@ -29,11 +29,7 @@ def generate_launch_description():
         executable="navigation_node",
         name="navigation_node",
         output="screen",
-        parameters=[
-            os.path.join(config_dir, "terrain_params.yaml"),
-            os.path.join(config_dir, "planner_params.yaml"),
-            os.path.join(config_dir, "controller_params.yaml"),
-        ],
+        parameters=[os.path.join(config_dir, "native_navigation.yaml")],
         arguments=["--ros-args", "--log-level", log_level],
         emulate_tty=True,
     )

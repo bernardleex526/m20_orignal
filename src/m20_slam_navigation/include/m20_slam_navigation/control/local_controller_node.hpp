@@ -63,11 +63,22 @@ public:
   /// Set parameters
   void setParams(const LocalControllerParams& params);
 
+  /// Native /planner_mode control: 0=automatic, 1=LinePlanner, 2=DWA.
+  void setPlannerMode(int mode);
+
+  /// Cancel the active navigation request and force a zero command.
+  void cancel();
+
+  /// Clear a previous cancellation.
+  void resume();
+
 private:
   LocalControllerParams                params_;
   std::unique_ptr<DWAPlanner>          dwa_planner_;
   std::unique_ptr<LinePlanner>         line_planner_;
   Mode                                 current_mode_{Mode::DWA};
+  int                                  requested_mode_{0};
+  bool                                 canceled_{false};
   VelocityCallback                     vel_cb_;
   mutable std::mutex                   mutex_;
 };

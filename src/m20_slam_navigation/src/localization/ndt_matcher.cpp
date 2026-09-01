@@ -3,6 +3,7 @@
 
 #include <pcl/registration/ndt.h>
 
+#include <algorithm>
 #include <chrono>
 #include <random>
 
@@ -20,10 +21,8 @@ NDTResult NDTMatcher::align(
     const SE3Pose& T_init) {
 
   NDTResult result;
-  result.converged = false;
-  result.fitness_score = 1.0;
-
-  if (!target_map_ || target_map_->empty()) return result;
+  result.T_world_lidar = T_init;
+  if (!source || source->empty() || !target_map_ || target_map_->empty()) return result;
 
   // Set up PCL NDT
   pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
@@ -67,13 +66,13 @@ NDTResult NDTMatcher::globalRelocalize(
     int num_hypotheses) {
 
   NDTResult best_result;
-  best_result.fitness_score = 1e9;
-  best_result.converged = false;
 
   // Generate hypotheses: grid sampling within search radius
   std::mt19937 rng(42);  // fixed seed for reproducibility
   std::uniform_real_distribution<Scalar> dist_xy(-search_radius_xy, search_radius_xy);
-  std::uniform_real_distribution<Scalar> dist_yaw(-math::kPI, math::kPI);
+  const Scalar yaw_range = std::clamp(
+      params_.hypothesis_rot_range, Scalar(0.0), math::kPI);
+  std::uniform_real_distribution<Scalar> dist_yaw(-yaw_range, yaw_range);
 
   for (int h = 0; h < num_hypotheses; ++h) {
     SE3Pose hypothesis;

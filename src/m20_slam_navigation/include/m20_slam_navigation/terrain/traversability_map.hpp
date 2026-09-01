@@ -12,7 +12,6 @@
  *
  * Final cost per cell:
  *   cost = w_slope·c_slope + w_roughness·c_roughness + w_step·c_step
- *        + w_occlusion·c_occlusion
  *
  * Output is a 2D costmap (grid of uint8_t costs) suitable for Nav2 costmap layers.
  */
@@ -61,6 +60,8 @@ public:
   int width()  const;
   int height() const;
   Scalar resolution() const;
+  Scalar originX() const;
+  Scalar originY() const;
 
   /// Query traversability cost at world coordinate
   uint8_t costAt(Scalar x, Scalar y) const;

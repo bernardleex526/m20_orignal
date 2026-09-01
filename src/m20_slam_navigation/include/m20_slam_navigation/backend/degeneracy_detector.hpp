@@ -31,10 +31,12 @@ namespace m20::backend {
 
 struct DegeneracyResult {
   bool                               is_degenerate{false};
-  Eigen::Matrix<Scalar, 6, 1>        degenerate_directions;  ///< binary mask of degenerate DoFs
+  Eigen::Matrix<Scalar, 6, 1> degenerate_directions{
+    Eigen::Matrix<Scalar, 6, 1>::Zero()};  ///< binary mask of degenerate DoFs
   std::vector<Eigen::Matrix<Scalar, 6, 1>> degenerate_eigenvectors;
   std::vector<Scalar>                      eigenvalues;
-  Eigen::Matrix<Scalar, 6, 6>             filtered_hessian;  ///< Hessian with degenerate dims zeroed
+  Eigen::Matrix<Scalar, 6, 6> filtered_hessian{
+    Eigen::Matrix<Scalar, 6, 6>::Zero()};  ///< Hessian with degenerate dims zeroed
 };
 
 class DegeneracyDetector {
@@ -50,25 +52,6 @@ public:
    */
   DegeneracyResult analyze(const Eigen::Matrix<Scalar, 6, 6>& H,
                            const Eigen::Matrix<Scalar, 3, 1>& robot_heading);
-
-  /**
-   * @brief Filter LiDAR correction vector to remove degenerate components.
-   *
-   * δξ_filtered = (I − Σ v_i·v_iᵀ) · δξ_raw
-   * where v_i are the degenerate eigenvectors that align with robot heading.
-   *
-   * @param correction_raw       6×1 raw correction from Gauss-Newton
-   * @param degeneracy           Degeneracy analysis result
-   * @return                     Filtered correction (degenerate DoFs zeroed)
-   */
-  Eigen::Matrix<Scalar, 6, 1> filterCorrection(
-      const Eigen::Matrix<Scalar, 6, 1>& correction_raw,
-      const DegeneracyResult& degeneracy) const;
-
-  /// Replace degenerate displacement with odometry estimate
-  Eigen::Matrix<Scalar, 6, 1> fuseOdometryCorrection(
-      const Eigen::Matrix<Scalar, 6, 1>& correction_filtered,
-      const Eigen::Matrix<Scalar, 6, 1>& odom_displacement) const;
 
 private:
   BackendParams params_;

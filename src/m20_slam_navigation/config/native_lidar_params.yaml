@@ -1,0 +1,12 @@
+# Snapshot of /opt/ros/foxy/share/passable_area/config/lidar_params.yaml.
+m20:
+  lidar_front:
+    pos_body: [0.32028, 0.0, -0.013]
+    rpy_body: [0.0, 90.0, 0.0]
+    fov_up_deg: 90.0
+    fov_down_deg: 0.0
+  lidar_rear:
+    pos_body: [-0.32028, 0.0, -0.013]
+    rpy_body: [0.0, -90.0, 0.0]
+    fov_up_deg: 90.0
+    fov_down_deg: 0.0

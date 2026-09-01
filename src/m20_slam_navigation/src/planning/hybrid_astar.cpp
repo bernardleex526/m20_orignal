@@ -13,18 +13,24 @@ HybridAStar::HybridAStar(const GlobalPlannerParams& planner_params,
                          const TerrainParams& terrain_params)
     : planner_params_(planner_params)
     , terrain_params_(terrain_params)
-    , num_heading_bins_(planner_params.num_heading_bins)
-    , heading_bin_res_(2.0 * math::kPI / static_cast<Scalar>(planner_params.num_heading_bins)) {
-
-  // Generate motion primitives
-  primitives_ = MotionPrimitives::generateOmnidirectional(
-      8, planner_params.primitive_length, planner_params.max_curvature, 3);
-}
+    , primitives_(MotionPrimitives::generateOmnidirectional(
+        planner_params.num_directions,
+        planner_params.step_size > 0.0
+          ? planner_params.step_size : planner_params.primitive_length,
+        planner_params.max_curvature,
+        planner_params.num_steerind > 0
+          ? planner_params.num_steerind : planner_params.num_rotations,
+        planner_params.max_steer * planner_params.sample_interval))
+    , num_heading_bins_(std::max(planner_params.num_heading_bins, 1))
+    , heading_bin_res_(2.0 * math::kPI / static_cast<Scalar>(num_heading_bins_))
+    , state_grid_resolution_(planner_params.grid_resolution) {}
 
 GridIndex HybridAStar::stateToGrid(Scalar x, Scalar y, Scalar theta) const {
   GridIndex idx;
-  idx.ix = static_cast<int>(std::floor((x - dijkstra_origin_x_) / planner_params_.grid_resolution));
-  idx.iy = static_cast<int>(std::floor((y - dijkstra_origin_y_) / planner_params_.grid_resolution));
+  const Scalar resolution = state_grid_resolution_ > 0.0
+      ? state_grid_resolution_ : planner_params_.grid_resolution;
+  idx.ix = static_cast<int>(std::floor((x - dijkstra_origin_x_) / resolution));
+  idx.iy = static_cast<int>(std::floor((y - dijkstra_origin_y_) / resolution));
   // Discretize theta
   int t = static_cast<int>(std::floor(math::normalize_angle(theta) / heading_bin_res_ + 0.5));
   idx.itheta = ((t % num_heading_bins_) + num_heading_bins_) % num_heading_bins_;
@@ -43,6 +49,8 @@ void HybridAStar::computeDijkstraHeuristic(
   dijkstra_resolution_ = resolution;
   dijkstra_origin_x_ = origin_x;
   dijkstra_origin_y_ = origin_y;
+  dijkstra_goal_x_ = goal_x;
+  dijkstra_goal_y_ = goal_y;
 
   // BFS from goal outward (2D)
   using Node = std::pair<Scalar, int>;  // (cost, flat_index)
@@ -79,8 +87,9 @@ void HybridAStar::computeDijkstraHeuristic(
 
       Scalar step_cost = (dx[k] != 0 && dy[k] != 0) ? diag_cost : straight_cost;
       // Add terrain cost
-      Scalar terrain_penalty = costmap[nidx] / 255.0 * straight_cost;
-      Scalar new_cost = cost + step_cost + terrain_penalty;
+      Scalar terrain_penalty = costmap[nidx] / 255.0 * straight_cost *
+                               planner_params_.weight_b;
+      Scalar new_cost = cost + step_cost * planner_params_.weight_a + terrain_penalty;
 
       if (new_cost < dijkstra_costmap_[nidx]) {
         dijkstra_costmap_[nidx] = new_cost;
@@ -98,12 +107,17 @@ std::vector<Eigen::Matrix<Scalar, 3, 1>> HybridAStar::plan(
     const Eigen::Matrix<Scalar, 3, 1>& goal) {
 
   search_start_ = std::chrono::steady_clock::now();
+  if (resolution > 0.0) state_grid_resolution_ = resolution;
 
   // Precompute Dijkstra heuristic (must have been called before, or redo)
   if (dijkstra_costmap_.empty() ||
       dijkstra_width_ != width ||
       dijkstra_height_ != height ||
-      std::abs(dijkstra_resolution_ - resolution) > 1e-6) {
+      std::abs(dijkstra_resolution_ - resolution) > 1e-6 ||
+      std::abs(dijkstra_origin_x_ - origin_x) > 1e-6 ||
+      std::abs(dijkstra_origin_y_ - origin_y) > 1e-6 ||
+      std::abs(dijkstra_goal_x_ - goal.x()) > 1e-6 ||
+      std::abs(dijkstra_goal_y_ - goal.y()) > 1e-6) {
     computeDijkstraHeuristic(costmap, width, height, resolution, origin_x, origin_y,
                              goal.x(), goal.y());
   }
@@ -122,13 +136,13 @@ std::vector<Eigen::Matrix<Scalar, 3, 1>> HybridAStar::plan(
     start_state.y = start.y();
     start_state.theta = start.z();
     start_state.g_cost = 0;
-    start_state.h_cost = nonHoloHeuristic(start.x(), start.y(), start.theta(),
+    start_state.h_cost = nonHoloHeuristic(start.x(), start.y(), start.z(),
                                            goal.x(), goal.y(), goal.z());
     start_state.parent_idx = -1;
     start_state.closed = false;
 
     closed_list.push_back(start_state);
-    GridIndex gidx = stateToGrid(start.x(), start.y(), start.theta());
+    GridIndex gidx = stateToGrid(start.x(), start.y(), start.z());
     state_to_idx[gidx] = 0;
 
     open.push({start_state.f_cost(), 0});
@@ -145,10 +159,11 @@ std::vector<Eigen::Matrix<Scalar, 3, 1>> HybridAStar::plan(
     }
 
     auto [f_cost, idx] = open.top(); open.pop();
-    HybridState& state = closed_list[idx];
-
-    if (state.closed) continue;
-    state.closed = true;
+    if (closed_list[idx].closed) continue;
+    closed_list[idx].closed = true;
+    // Keep a value copy: expanding a primitive can grow closed_list and
+    // invalidate references to its storage.
+    const HybridState state = closed_list[idx];
     expansions++;
 
     // Check goal
@@ -156,7 +171,14 @@ std::vector<Eigen::Matrix<Scalar, 3, 1>> HybridAStar::plan(
         (state.x - goal.x()) * (state.x - goal.x()) +
         (state.y - goal.y()) * (state.y - goal.y()));
 
-    if (dist_to_goal < planner_params_.primitive_length * 0.5) {
+    if (dist_to_goal <= std::max(
+            planner_params_.goal_dis, planner_params_.xy_tolerance)) {
+      if (!isSegmentCollisionFree(
+              state.x, state.y, state.theta,
+              goal.x(), goal.y(), goal.z(),
+              costmap, width, height, resolution, origin_x, origin_y)) {
+        continue;
+      }
       // Close enough: create goal state
       HybridState goal_state;
       goal_state.x = goal.x();
@@ -179,20 +201,35 @@ std::vector<Eigen::Matrix<Scalar, 3, 1>> HybridAStar::plan(
       Scalar nx, ny, ntheta;
       MotionPrimitives::apply(mp, state.x, state.y, state.theta, nx, ny, ntheta);
 
-      // Check collision
-      if (isCollision(nx, ny, ntheta, costmap, width, height, resolution, origin_x, origin_y)) {
+      // Check the swept robot footprint, not only the primitive endpoint.
+      if (!isSegmentCollisionFree(
+              state.x, state.y, state.theta, nx, ny, ntheta,
+              costmap, width, height, resolution, origin_x, origin_y)) {
         continue;
       }
 
       // Compute costs
-      Scalar g_cost = state.g_cost + mp.cost;
+      const Scalar translation_length = std::hypot(mp.dx, mp.dy);
+      const Scalar heading_change = std::abs(mp.dtheta);
+      const bool backwards = mp.dx < -1e-6;
+      const bool changed_steer = state.primitive_idx >= 0 &&
+          std::abs(mp.dtheta - primitives_[state.primitive_idx].dtheta) > 1e-6;
+      Scalar g_cost = state.g_cost + planner_params_.weight_a * translation_length
+                    + planner_params_.weight_heading * heading_change
+                    + planner_params_.cost_steer * heading_change
+                    + (changed_steer ? planner_params_.cost_steerchange : 0.0)
+                    + (backwards ? planner_params_.cost_gear + planner_params_.cost_backward : 0.0);
 
       // Terrain cost from costmap
       int gx = static_cast<int>(std::floor((nx - origin_x) / resolution));
       int gy = static_cast<int>(std::floor((ny - origin_y) / resolution));
       if (gx >= 0 && gx < width && gy >= 0 && gy < height) {
-        Scalar terrain_cost = costmap[gy * width + gx] / 255.0 * mp.cost;
-        g_cost += terrain_cost * 2.0;  // weight terrain
+        Scalar terrain_cost = costmap[gy * width + gx] / 255.0 *
+                              translation_length * planner_params_.weight_b;
+        // cost_reduce is a native terrain-cost scale, not a discount on the
+        // accumulated path cost.  Applying it to g_cost made a longer path
+        // cheaper whenever it crossed any non-zero cell.
+        g_cost += terrain_cost * std::max(planner_params_.cost_reduce, Scalar(0.01));
       }
 
       Scalar h_cost = nonHoloHeuristic(nx, ny, ntheta,
@@ -202,7 +239,8 @@ std::vector<Eigen::Matrix<Scalar, 3, 1>> HybridAStar::plan(
         d_cost = dijkstra_costmap_[gy * width + gx];
       }
       // Use max heuristic
-      h_cost = std::max(h_cost, d_cost);
+      h_cost = std::max(h_cost * std::max(planner_params_.heuristic_weight, Scalar(0.0)),
+                        d_cost);
 
       GridIndex nidx = stateToGrid(nx, ny, ntheta);
       auto it = state_to_idx.find(nidx);
@@ -254,7 +292,7 @@ Scalar HybridAStar::nonHoloHeuristic(
       std::atan2(gy - y, gx - x) - theta));
   Scalar heading_penalty = std::min(heading_error, math::k2PI - heading_error) * 0.3;
 
-  return dist + heading_penalty;
+  return planner_params_.weight_a * dist + planner_params_.weight_heading * heading_penalty;
 }
 
 std::vector<Eigen::Matrix<Scalar, 3, 1>> HybridAStar::reconstructPath(
@@ -279,23 +317,58 @@ bool HybridAStar::isCollision(
     int width, int height, Scalar resolution,
     Scalar origin_x, Scalar origin_y) const {
 
-  // Robot footprint: simplified circle of radius 0.5m
-  constexpr Scalar kRobotRadius = 0.5;
-  constexpr int kChecks = 8;
+  const Scalar half_length = std::max(planner_params_.body_length * 0.5, Scalar(0.01));
+  const Scalar half_width = std::max(planner_params_.body_width * 0.5, Scalar(0.01));
+  const int length_steps = std::max(1, static_cast<int>(std::ceil(half_length / resolution)));
+  const int width_steps = std::max(1, static_cast<int>(std::ceil(half_width / resolution)));
+  const Scalar c = std::cos(theta);
+  const Scalar s = std::sin(theta);
 
-  for (int i = 0; i < kChecks; ++i) {
-    Scalar angle = static_cast<Scalar>(i) * 2.0 * math::kPI / kChecks;
-    Scalar cx = x + kRobotRadius * std::cos(angle);
-    Scalar cy = y + kRobotRadius * std::sin(angle);
-
-    int gx = static_cast<int>(std::floor((cx - origin_x) / resolution));
-    int gy = static_cast<int>(std::floor((cy - origin_y) / resolution));
-
-    if (gx < 0 || gx >= width || gy < 0 || gy >= height) return true;
-    if (costmap[gy * width + gx] >= 254) return true;  // lethal or unknown
+  for (int il = -length_steps; il <= length_steps; ++il) {
+    for (int iw = -width_steps; iw <= width_steps; ++iw) {
+      const Scalar local_x = il * resolution;
+      const Scalar local_y = iw * resolution;
+      const Scalar cx = x + c * local_x - s * local_y;
+      const Scalar cy = y + s * local_x + c * local_y;
+      const int gx = static_cast<int>(std::floor((cx - origin_x) / resolution));
+      const int gy = static_cast<int>(std::floor((cy - origin_y) / resolution));
+      if (gx < 0 || gx >= width || gy < 0 || gy >= height) return true;
+      if (costmap[gy * width + gx] >= 254) return true;
+    }
   }
 
   return false;
+}
+
+bool HybridAStar::isSegmentCollisionFree(
+    Scalar x0, Scalar y0, Scalar theta0,
+    Scalar x1, Scalar y1, Scalar theta1,
+    const std::vector<uint8_t>& costmap,
+    int width, int height, Scalar resolution,
+    Scalar origin_x, Scalar origin_y) const {
+
+  const Scalar distance = std::hypot(x1 - x0, y1 - y0);
+  const Scalar angular_distance = std::abs(math::normalize_angle(theta1 - theta0));
+  const Scalar linear_interval = std::max(
+      std::min(planner_params_.sample_interval, resolution * Scalar(0.5)),
+      Scalar(0.01));
+  const Scalar angular_interval = std::max(heading_bin_res_ * Scalar(0.5), Scalar(0.05));
+  const int samples = std::max(
+      1, static_cast<int>(std::ceil(std::max(
+          distance / linear_interval, angular_distance / angular_interval))));
+  const Scalar delta_theta = math::normalize_angle(theta1 - theta0);
+
+  for (int i = 0; i <= samples; ++i) {
+    const Scalar ratio = static_cast<Scalar>(i) / static_cast<Scalar>(samples);
+    const Scalar x = x0 + ratio * (x1 - x0);
+    const Scalar y = y0 + ratio * (y1 - y0);
+    const Scalar theta = math::normalize_angle(theta0 + ratio * delta_theta);
+    if (isCollision(x, y, theta, costmap, width, height, resolution,
+                    origin_x, origin_y)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace m20::planning
