@@ -8,7 +8,10 @@ WORKSPACE="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 MAP_NAME="m20_map"
 OUTPUT_DIR=""
 BAG_PATH=""
+VENDOR_MAP_DIR=""
 USE_RVIZ="true"
+INPUT_TRANSPORT="drdds"
+TAKEOVER_VENDOR_OUTPUTS="false"
 FORCE_BUILD="false"
 SKIP_BUILD="false"
 DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
@@ -23,8 +26,11 @@ usage() {
     "  --map-name NAME       map directory prefix (default: m20_map)" \
     "  --output-dir DIR      exact output directory" \
     "  --bag PATH            replay a ROS 2 bag instead of waiting for live topics" \
+    "  --vendor-map DIR      reuse a completed drmap map package and run only the m20 backend" \
     "  --domain ID           ROS_DOMAIN_ID (default: current or 0)" \
     "  --no-rviz             do not start RViz" \
+    "  --input-transport T   live input: drdds or ros2 (default: drdds)" \
+    "  --takeover-vendor-outputs  publish vendor topic names and TF (requires vendor SLAM stopped)" \
     "  --build               force a clean package rebuild" \
     "  --skip-build          use the existing install space" \
     "  -h, --help            show this help"
@@ -44,12 +50,24 @@ while (($#)); do
       BAG_PATH="${2:?missing bag path}"
       shift 2
       ;;
+    --vendor-map)
+      VENDOR_MAP_DIR="${2:?missing vendor map directory}"
+      shift 2
+      ;;
     --domain)
       DOMAIN_ID="${2:?missing domain ID}"
       shift 2
       ;;
     --no-rviz)
       USE_RVIZ="false"
+      shift
+      ;;
+    --input-transport)
+      INPUT_TRANSPORT="${2:?missing input transport}"
+      shift 2
+      ;;
+    --takeover-vendor-outputs)
+      TAKEOVER_VENDOR_OUTPUTS="true"
       shift
       ;;
     --build)
@@ -71,6 +89,12 @@ while (($#)); do
       ;;
   esac
 done
+
+if [[ "${INPUT_TRANSPORT}" != "drdds" && "${INPUT_TRANSPORT}" != "ros2" ]]; then
+  printf 'Unsupported input transport: %s (expected drdds or ros2)\n' \
+    "${INPUT_TRANSPORT}" >&2
+  exit 2
+fi
 
 source_ros() {
   set +u
@@ -101,6 +125,14 @@ if [[ -n "${BAG_PATH}" && ! -e "${BAG_PATH}" ]]; then
   printf 'Bag path does not exist: %s\n' "${BAG_PATH}" >&2
   exit 1
 fi
+if [[ -n "${VENDOR_MAP_DIR}" && ! -d "${VENDOR_MAP_DIR}" ]]; then
+  printf 'Vendor map directory does not exist: %s\n' "${VENDOR_MAP_DIR}" >&2
+  exit 1
+fi
+if [[ -n "${BAG_PATH}" && -n "${VENDOR_MAP_DIR}" ]]; then
+  printf '%s\n' '--bag and --vendor-map are mutually exclusive' >&2
+  exit 2
+fi
 
 if [[ -z "${OUTPUT_DIR}" ]]; then
   OUTPUT_DIR="${WORKSPACE}/maps/${MAP_NAME}-$(date +%Y%m%d-%H%M%S)"
@@ -122,7 +154,7 @@ if ((${#running_slam_pids[@]} > 0)); then
   exit 1
 fi
 
-if pgrep -x slam_ddsnode >/dev/null 2>&1; then
+if [[ "${TAKEOVER_VENDOR_OUTPUTS}" == "true" ]] && pgrep -x slam_ddsnode >/dev/null 2>&1; then
   printf 'The vendor slam_ddsnode is running; stop its mapping service before using the same topics and TF.\n' >&2
   pgrep -af '(^|/)slam_ddsnode( |$)' >&2 || true
   exit 1
@@ -136,7 +168,7 @@ if [[ "${SKIP_BUILD}" != "true" ]] && {
   (
     cd "${WORKSPACE}"
     colcon build --symlink-install --packages-select m20_slam_navigation \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_EXPERIMENTAL_NAVIGATION=OFF
   )
 fi
 
@@ -147,6 +179,16 @@ fi
 set +u
 source "${WORKSPACE}/install/setup.bash"
 set -u
+
+if [[ -n "${VENDOR_MAP_DIR}" ]]; then
+  POSTPROCESSOR="${WORKSPACE}/install/m20_slam_navigation/lib/m20_slam_navigation/m20_vendor_map_postprocessor"
+  if [[ ! -x "${POSTPROCESSOR}" ]]; then
+    printf 'Missing vendor map postprocessor: %s\n' "${POSTPROCESSOR}" >&2
+    exit 1
+  fi
+  printf 'Reusing vendor LIO map package; running only the orignal_m20 PGO/map backend.\n'
+  exec "${POSTPROCESSOR}" "${VENDOR_MAP_DIR}" "${OUTPUT_DIR}"
+fi
 
 wait_for_topic() {
   local topic="$1"
@@ -273,9 +315,9 @@ cleanup() {
   stop_group "${LAUNCH_PID}"
   stop_workspace_slam_nodes
   if [[ -n "${DRDDS_PID}" ]]; then
-    sudo -n kill -INT -- "-${DRDDS_PID}" 2>/dev/null || true
+    kill -INT -- "-${DRDDS_PID}" 2>/dev/null || true
     sleep 1
-    sudo -n kill -TERM -- "-${DRDDS_PID}" 2>/dev/null || true
+    kill -TERM -- "-${DRDDS_PID}" 2>/dev/null || true
   fi
   wait "${BAG_PID}" 2>/dev/null || true
   wait "${LAUNCH_PID}" 2>/dev/null || true
@@ -287,45 +329,52 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-if [[ -z "${BAG_PATH}" ]]; then
+if [[ -z "${BAG_PATH}" && "${INPUT_TRANSPORT}" == "drdds" ]]; then
   DRDDS_RECEIVER="${WORKSPACE}/install/m20_slam_navigation/lib/m20_slam_navigation/m20_drdds_receiver"
   if [[ ! -x "${DRDDS_RECEIVER}" ]]; then
     printf 'Missing DrDDS receiver: %s\n' "${DRDDS_RECEIVER}" >&2
     exit 1
   fi
-  printf 'DrDDS shared memory requires root access; validating sudo once.\n'
-  sudo -v
-  # Authenticate while still attached to this terminal, then create the
-  # receiver's detached process group as root.  Running `setsid sudo -n`
-  # first loses a tty-scoped sudo timestamp on M20Pro and immediately fails.
-  sudo -n setsid env LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
-    "${DRDDS_RECEIVER}" \
+  # Keep ROS 2's bundled FastDDS and the vendor FastDDS 2.14 in separate
+  # processes. Loading both in slam_node corrupts ParticipantProxyData and
+  # crashes on the M20Pro. This helper uses the robot-owned libdrdds; it does
+  # not implement a second DDS stack or republish a DDS topic.
+  setsid "${DRDDS_RECEIVER}" \
     --lidar-topic /LIDAR/POINTS \
     --imu-topic /IMU \
     --domain 0 \
     --prefix rt \
-    --network eth0/eth1 \
     --lidar-socket /tmp/m20_drdds_lidar.sock \
     --imu-socket /tmp/m20_drdds_imu.sock \
-    --shm &
+    --wait-for-data-ms 30000 &
   DRDDS_PID=$!
-  for _ in {1..20}; do
+  for _ in {1..140}; do
     [[ -S /tmp/m20_drdds_lidar.sock && -S /tmp/m20_drdds_imu.sock ]] && break
     if ! kill -0 "${DRDDS_PID}" 2>/dev/null; then
-      printf 'DrDDS receiver exited before creating its socket.\n' >&2
+      wait "${DRDDS_PID}" || true
+      printf 'Native DrDDS input exited before mapper startup.\n' >&2
       exit 1
     fi
     sleep 0.25
   done
+  if ! kill -0 "${DRDDS_PID}" 2>/dev/null; then
+    wait "${DRDDS_PID}" || true
+    printf 'Native DrDDS live sensor preflight failed; mapper was not started.\n' >&2
+    exit 1
+  fi
   if [[ ! -S /tmp/m20_drdds_lidar.sock || ! -S /tmp/m20_drdds_imu.sock ]]; then
-    printf 'Timed out waiting for vendor LiDAR/IMU sockets\n' >&2
+    printf 'Timed out waiting for native DrDDS input sockets.\n' >&2
     exit 1
   fi
 fi
 
-printf 'Starting M20 mapping with the OEM topic/TF contract. Ctrl+C saves and exits.\n'
-LIDAR_TRANSPORT="drdds"
-IMU_TRANSPORT="drdds"
+if [[ "${TAKEOVER_VENDOR_OUTPUTS}" == "true" ]]; then
+  printf 'Starting M20 mapping with vendor output topics and TF. Ctrl+C saves and exits.\n'
+else
+  printf 'Starting isolated M20 mapping under /m20_slam with TF disabled. Ctrl+C saves and exits.\n'
+fi
+LIDAR_TRANSPORT="${INPUT_TRANSPORT}"
+IMU_TRANSPORT="${INPUT_TRANSPORT}"
 MAX_LIDAR_QUEUE_SIZE="3"
 CHECKPOINT_SAVE_PERIOD_S="10.0"
 if [[ -n "${BAG_PATH}" ]]; then
@@ -347,6 +396,8 @@ setsid ros2 launch m20_slam_navigation slam_system.launch.py \
   drdds_imu_socket_path:=/tmp/m20_drdds_imu.sock \
   max_lidar_queue_size:="${MAX_LIDAR_QUEUE_SIZE}" \
   checkpoint_save_period_s:="${CHECKPOINT_SAVE_PERIOD_S}" \
+  use_vendor_topic_names:="${TAKEOVER_VENDOR_OUTPUTS}" \
+  publish_tf:="${TAKEOVER_VENDOR_OUTPUTS}" \
   map_save_path:="${MAP_PATH}" &
 LAUNCH_PID=$!
 

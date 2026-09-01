@@ -42,7 +42,7 @@ struct ScanContextDescriptor {
   FrameId frame_id{INVALID_FRAME_ID};
   SE3Pose pose;
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud{
-    std::make_shared<pcl::PointCloud<pcl::PointXYZI>>()};
+    new pcl::PointCloud<pcl::PointXYZI>()};
 
   /// Compute cosine distance to another descriptor, searching best column alignment
   Scalar distance(const ScanContextDescriptor& other) const;

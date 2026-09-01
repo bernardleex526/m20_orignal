@@ -30,7 +30,8 @@ void TraversabilityMap::update(
   // Step 1: Update elevation grid
   elevation_grid_->update(cloud, T_world_lidar);
 
-  auto cloud_world = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+  pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_world(
+      new pcl::PointCloud<pcl::PointXYZI>());
   cloud_world->reserve(cloud->size());
   for (const auto& point : cloud->points) {
     const Eigen::Matrix<Scalar, 3, 1> transformed = T_world_lidar.transformPoint(

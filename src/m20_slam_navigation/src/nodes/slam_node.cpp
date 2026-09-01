@@ -262,17 +262,17 @@ private:
     declare_parameter<std::string>("imu_topic", "/IMU");
     declare_parameter<std::string>("imu_transport", "ros2");
     declare_parameter<std::string>("drdds.imu_socket_path", "/tmp/m20_drdds_imu.sock");
-    declare_parameter<std::string>("output_odom_topic", "/SLAM_ODOM");
+    declare_parameter<std::string>("output_odom_topic", "/m20_slam/odom");
     declare_parameter<std::string>(
-      "output_aligned_cloud_topic", "/SLAM_ALIGNED_POINTS");
+      "output_aligned_cloud_topic", "/m20_slam/aligned_points");
     declare_parameter<std::string>(
-      "output_body_cloud_topic", "/SLAM_CLOUD_REGISTERED_BODY");
-    declare_parameter<std::string>("output_voxel_cloud_topic", "/DEPTH_POINTS");
-    declare_parameter<std::string>("output_depth_image_topic", "/DEPTH_IMAGE");
+      "output_body_cloud_topic", "/m20_slam/cloud_registered_body");
+    declare_parameter<std::string>("output_voxel_cloud_topic", "/m20_slam/depth_points");
+    declare_parameter<std::string>("output_depth_image_topic", "/m20_slam/depth_image");
     declare_parameter<std::string>(
-      "output_accumulated_map_cloud_topic", "/SLAM_ACCUMULATED_POINTS_MAP");
-    declare_parameter<std::string>("path_output_topic", "/path");
-    declare_parameter<bool>("use_vendor_topic_names", true);
+      "output_accumulated_map_cloud_topic", "/m20_slam/accumulated_points_map");
+    declare_parameter<std::string>("path_output_topic", "/m20_slam/path");
+    declare_parameter<bool>("use_vendor_topic_names", false);
     declare_parameter<std::string>("map_frame", "camera_init");
     declare_parameter<std::string>("tracking_frame", "base_link");
     declare_parameter<std::string>("body_frame", "base_link");
@@ -280,7 +280,7 @@ private:
     declare_parameter<bool>("lio.save_full_pcd", false);
     declare_parameter<std::string>(
       "lio.full_map_save_path", "/var/opt/robot/data/maps/active/full_cloud.pcd");
-    declare_parameter<bool>("publish_tf", true);
+    declare_parameter<bool>("publish_tf", false);
     declare_parameter<bool>("auto_save_on_shutdown", true);
     declare_parameter<double>("checkpoint_save_period_s", 10.0);
     declare_parameter<int>("publish_map_every_n_keyframes", 5);
@@ -1190,7 +1190,8 @@ private:
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr makeHeightCloud() const
   {
-    auto output = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr output(
+        new pcl::PointCloud<pcl::PointXYZ>());
     if (!lio_odom_ || height_resolution_ <= 0.0) return output;
     const auto source = makeMapCloud();
     const auto T_body_world = lio_odom_->getCurrentPose().pose.inverse();
@@ -1588,7 +1589,7 @@ private:
   std::string map_save_path_;
   bool save_full_pcd_{false};
   std::string full_map_save_path_;
-  bool publish_tf_{true};
+  bool publish_tf_{false};
   bool auto_save_on_shutdown_{true};
   double checkpoint_save_period_s_{10.0};
   int publish_map_every_n_keyframes_{5};

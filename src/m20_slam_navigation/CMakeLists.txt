@@ -44,15 +44,15 @@ find_path(M20_VENDOR_DRDDS_INCLUDE_DIR
   NAMES drdds/core/drdds_core.h
   HINTS ${drdds_INCLUDE_DIRS} /usr/local/include)
 find_path(M20_VENDOR_DRIDL_INCLUDE_DIR
-  NAMES dridl/dr_msgs/msg/PointCloud2PubSubTypes.h
+  NAMES dridl/sensor_msgs/msg/PointCloud2PubSubTypes.h
   HINTS ${drdds_INCLUDE_DIRS} /usr/local/include)
 
 set(M20_VENDOR_DRDDS_FOUND FALSE)
 if(drdds_FOUND AND M20_VENDOR_DRDDS_INCLUDE_DIR AND M20_VENDOR_DRIDL_INCLUDE_DIR)
   set(M20_VENDOR_DRDDS_FOUND TRUE)
   set(M20_REQUIRED_DRIDL_HEADERS
-    dridl/dr_msgs/msg/PointCloud2PubSubTypes.h
-    dridl/dr_msgs/msg/ImuPubSubTypes.h
+    dridl/sensor_msgs/msg/PointCloud2PubSubTypes.h
+    dridl/sensor_msgs/msg/ImuPubSubTypes.h
     dridl/dr_msgs/msg/MotionInfoPubSubTypes.h
     dridl/dr_msgs/msg/NavCmdPubSubTypes.h
     dridl/dr_msgs/msg/PlannerStatusPubSubTypes.h
@@ -216,6 +216,10 @@ target_include_directories(m20_drdds_receiver PRIVATE include)
 target_link_libraries(
   m20_drdds_receiver PRIVATE m20_drdds_input m20_pointcloud_wire Threads::Threads pthread)
 
+add_executable(m20_vendor_map_postprocessor src/tools/vendor_map_postprocessor.cpp)
+target_include_directories(m20_vendor_map_postprocessor PRIVATE include ${PCL_INCLUDE_DIRS})
+target_link_libraries(m20_vendor_map_postprocessor PRIVATE m20_slam_core ${PCL_LIBRARIES})
+
 function(add_m20_component target source plugin executable)
   add_library(${target} SHARED ${source})
   target_include_directories(${target} PRIVATE include ${PCL_INCLUDE_DIRS})
@@ -264,6 +268,7 @@ install(
   RUNTIME DESTINATION bin
 )
 install(TARGETS m20_drdds_receiver RUNTIME DESTINATION lib/${PROJECT_NAME})
+install(TARGETS m20_vendor_map_postprocessor RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(FILES config/m20_mapping.yaml DESTINATION share/${PROJECT_NAME}/config)
 if(BUILD_EXPERIMENTAL_NAVIGATION)

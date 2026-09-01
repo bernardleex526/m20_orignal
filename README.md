@@ -6,7 +6,9 @@
 Hybrid A* + cubic spline、DWA + LinePlanner 的对应实现，保持原厂参数名和话题名。
 
 > 重要边界：这是对闭源原厂算法的工程重建，不是原厂私有源码的 1:1 复制。建图
-> 默认使用原厂话题和 TF 合同，启动前必须停掉原厂同名节点；导航适配器默认
+> 真机默认使用隔离的 `/m20_slam/*` 输出并关闭 TF，可与原厂定位链并联做静止
+> 验收；只有显式使用 `--takeover-vendor-outputs` 才切换到原厂同名话题和 TF，且
+> 启动前必须停掉原厂同名节点。导航适配器默认
 > `navigation.enable_motion_output=false`，不会
 > 因为启动节点而向机器人发运动指令，也不自动接管导航系统的 TF。
 
@@ -25,6 +27,15 @@ Hybrid A* + cubic spline、DWA + LinePlanner 的对应实现，保持原厂参�
 本次发布前复测产物位于本机忽略目录 `maps/review_release_20260831/`。轨迹长度
 差异约 4.7%，首尾误差约 0.05 m。原厂基线来自 NOS 实机上的 ARM64/Foxy 闭源
 `slam_ddsnode`；本仓库不能在 x86 主机上直接执行该二进制。
+
+2026-09-01 对 M20 PRO V1.1.8.7 三板实机做了只读核验：`/IMU` 为
+RELIABLE/volatile；NOS 的配置与历史 DDS 发现结果均指向 `/LIDAR/POINTS`，但本轮
+ROS 2 图检查时该话题没有实时 publisher/sample；原生 DrDDS 预检能匹配 2 个
+LiDAR publisher，但 5 秒内 `updated=no`，而 `/IMU` 为 `matched=1 updated=yes`。
+两台雷达 `10.21.33.201/.202` 可 ping，`hsLidar` 也在监听 UDP 2361/2362，因此
+当前验收边界是“网络、端点与进程存在，点云帧未到达”，不能据此宣称真机建图
+已通过。详见
+`docs/M20PRO_LIVE_ADAPTATION_20260901.md`。
 
 ## 算法组成
 
@@ -163,7 +174,21 @@ shared memory=true
 
 ## 输出接口
 
-默认输出与原厂合同同名，因此本节点和原厂 `slam_ddsnode` 不能同时运行：
+真机默认输出采用隔离命名且不广播 TF，不会接管原厂定位/导航数据链：
+
+| 默认输出 | 类型 |
+|---|---|
+| `/m20_slam/odom` | `nav_msgs/msg/Odometry` |
+| `/m20_slam/aligned_points` | `sensor_msgs/msg/PointCloud2` |
+| `/m20_slam/cloud_registered_body` | `sensor_msgs/msg/PointCloud2` |
+| `/m20_slam/depth_points` | `sensor_msgs/msg/PointCloud2` |
+| `/m20_slam/depth_image` | `sensor_msgs/msg/Image` |
+| `/m20_slam/accumulated_points_map` | `sensor_msgs/msg/PointCloud2` |
+| `/m20_slam/path` | `nav_msgs/msg/Path` |
+| `/m20_slam/save_map` | `std_srvs/srv/Trigger` |
+
+显式加入 `--takeover-vendor-outputs` 后才启用以下原厂合同；此模式下本节点和原厂
+`slam_ddsnode` 不能同时运行：
 
 | 输出 | 类型 |
 |---|---|
@@ -199,8 +224,19 @@ cd ~/m20_orignal
 ./src/m20_slam_navigation/scripts/start_mapping.sh --map-name site_a
 ```
 
-脚本会完成 ROS 环境加载、重复进程保护、DrDDS socket 网关、生命周期节点启动、
-RViz（可选）和 Ctrl+C 自动保存。
+脚本会完成 ROS 环境加载、重复进程保护、生命周期节点启动、RViz（可选）和 Ctrl+C
+自动保存。实时输入 helper 直接链接机器人已有的 `libdrdds.so.1`，不创建第二个 DDS
+实现，也不重发 DDS 话题；它只用本地 socket 将消息交给算法进程。这个进程隔离是
+必需的：实机已证明把 ROS 2 Foxy 的 FastDDS 与厂商 FastDDS 2.14 加载到同一进程会
+在 Participant 公告阶段崩溃。ROS 2 订阅仅用于官方 bag 回放。
+
+默认命令仅发布隔离话题且不发布 TF。原厂同名输出仅在完成单独验收并停止原厂
+`slam_ddsnode` 后显式启用：
+
+```bash
+./src/m20_slam_navigation/scripts/start_mapping.sh \
+  --map-name site_a --takeover-vendor-outputs
+```
 
 ### 官方 bag 回放
 
@@ -213,13 +249,32 @@ cd ~/m20_orignal
   --skip-build
 ```
 
+### 复用原厂 `drmap` 建图结果
+
+实机原始 `/LIDAR/POINTS` 由原厂私有数据链交给 `slam_ddsnode`，外部 ROS 2 和独立
+DrDDS subscriber 即使端点匹配也收不到样本。推荐先按原厂流程完成建图，再让本仓库
+直接读取原厂 `poses.txt` 与 `lidar_cloud/*.pcd`，仅运行 ScanContext/GHT/ICP 和
+GTSAM/iSAM2 后端：
+
+```bash
+cd ~/m20_orignal
+./src/m20_slam_navigation/scripts/start_mapping.sh \
+  --vendor-map /var/opt/robot/data/maps/<原厂地图目录> \
+  --map-name site_a_backend \
+  --skip-build
+```
+
+输出目录包含 `optimized_poses.txt`、`optimized_full_cloud.pcd`、`loops.txt` 和
+`adapter_summary.txt`。该模式不启动 DDS、ROS 节点、TF、导航或运动控制，也不修改
+原厂地图和 `active` 软链接。
+
 ### 手工构建
 
 ```bash
 source /opt/ros/humble/setup.bash
 cd ~/m20_orignal
 colcon build --symlink-install --packages-select m20_slam_navigation \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_EXPERIMENTAL_NAVIGATION=ON
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_EXPERIMENTAL_NAVIGATION=OFF
 source install/setup.bash
 ```
 
@@ -268,8 +323,8 @@ backend.loop_min_submap_overlap 0.65
 
 ## 部署边界与安全
 
-- 原厂 `slam_ddsnode` 和本实现不能同时占用同一套输入/输出资源；A/B 测试前先停止
-  原厂建图服务。
+- 默认隔离输出允许并联做 mapping-only 数据链验收；只有启用
+  `--takeover-vendor-outputs` 时才要求先停止原厂 `slam_ddsnode`。
 - `start_mapping.sh` 仍只做 mapping-only 验证，不自动启动导航、Nav2、`cmd_vel`、
   motion bridge，也不重启原厂 AOS/NOS 服务；导航需要单独运行
   `navigation_system.launch.py`。

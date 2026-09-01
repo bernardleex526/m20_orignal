@@ -26,6 +26,8 @@ def generate_launch_description():
     map_save_path = LaunchConfiguration("map_save_path")
     max_lidar_queue_size = LaunchConfiguration("max_lidar_queue_size")
     checkpoint_save_period_s = LaunchConfiguration("checkpoint_save_period_s")
+    use_vendor_topic_names = LaunchConfiguration("use_vendor_topic_names")
+    publish_tf = LaunchConfiguration("publish_tf")
     log_level = LaunchConfiguration("log_level")
 
     slam_node = LifecycleNode(
@@ -48,6 +50,8 @@ def generate_launch_description():
                 "map_save_path": map_save_path,
                 "lio.max_lidar_queue_size": max_lidar_queue_size,
                 "checkpoint_save_period_s": checkpoint_save_period_s,
+                "use_vendor_topic_names": use_vendor_topic_names,
+                "publish_tf": publish_tf,
             },
         ],
         arguments=["--ros-args", "--log-level", log_level],
@@ -82,6 +86,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("max_lidar_queue_size", default_value="3"),
             DeclareLaunchArgument("checkpoint_save_period_s", default_value="10.0"),
+            DeclareLaunchArgument("use_vendor_topic_names", default_value="false"),
+            DeclareLaunchArgument("publish_tf", default_value="false"),
             DeclareLaunchArgument("log_level", default_value="info"),
             slam_node,
             rviz,

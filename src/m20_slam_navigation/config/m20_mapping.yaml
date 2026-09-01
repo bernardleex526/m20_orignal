@@ -7,31 +7,32 @@ slam_node:
     imu_topic: /IMU
     imu_transport: drdds
     drdds.domain_id: 0
-    drdds.use_shm: true
+    drdds.use_shm: false
     drdds.topic_prefix: rt
-    drdds.network_name: eth0/eth1
+    drdds.network_name: ""
     drdds.socket_path: /tmp/m20_drdds_lidar.sock
     drdds.imu_socket_path: /tmp/m20_drdds_imu.sock
 
-    # Exact deployed mapping output contract. Stop the vendor slam_ddsnode
-    # before starting this adapter to avoid duplicate publishers and TF owners.
-    output_odom_topic: /SLAM_ODOM
-    output_aligned_cloud_topic: /SLAM_ALIGNED_POINTS
+    # Safe live-validation defaults. These topics deliberately do not replace
+    # the vendor mapping/localization graph; takeover must be requested
+    # explicitly by the launch script after the vendor publisher is stopped.
+    output_odom_topic: /m20_slam/odom
+    output_aligned_cloud_topic: /m20_slam/aligned_points
     # The vendor binary publishes this additional body-frame channel even
     # though it is not listed in node.output_* in params.yaml.
-    output_body_cloud_topic: /SLAM_CLOUD_REGISTERED_BODY
-    output_voxel_cloud_topic: /DEPTH_POINTS
-    output_depth_image_topic: /DEPTH_IMAGE
-    output_accumulated_map_cloud_topic: /SLAM_ACCUMULATED_POINTS_MAP
-    use_vendor_topic_names: true
+    output_body_cloud_topic: /m20_slam/cloud_registered_body
+    output_voxel_cloud_topic: /m20_slam/depth_points
+    output_depth_image_topic: /m20_slam/depth_image
+    output_accumulated_map_cloud_topic: /m20_slam/accumulated_points_map
+    use_vendor_topic_names: false
     lidar_type: 1
     lidar_use_system_time: false
     imu_use_system_time: false
-    path_output_topic: /path
+    path_output_topic: /m20_slam/path
     map_frame: camera_init
     tracking_frame: base_link
     body_frame: base_link
-    publish_tf: true
+    publish_tf: false
 
     map_save_path: /var/opt/robot/data/maps/active/full_cloud.pcd
     auto_save_on_shutdown: true

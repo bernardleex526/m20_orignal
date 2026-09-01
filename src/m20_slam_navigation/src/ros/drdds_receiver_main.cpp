@@ -173,6 +173,7 @@ int main(int argc, char ** argv)
   std::string lidar_socket_path = "/tmp/m20_drdds_lidar.sock";
   std::string imu_socket_path = "/tmp/m20_drdds_imu.sock";
   bool enable_imu = true;
+  int wait_for_data_ms = 30000;
   for (int index = 1; index < argc; ++index) {
     const std::string argument = argv[index];
     if ((argument == "--topic" || argument == "--lidar-topic") && index + 1 < argc) {
@@ -193,6 +194,12 @@ int main(int argc, char ** argv)
       lidar_options.use_shm = imu_options.use_shm = true;
     } else if (argument == "--no-imu") {
       enable_imu = false;
+    } else if (argument == "--wait-for-data-ms" && index + 1 < argc) {
+      wait_for_data_ms = std::stoi(argv[++index]);
+      if (wait_for_data_ms < 0) {
+        std::cerr << "--wait-for-data-ms must be non-negative\n";
+        return 2;
+      }
     } else {
       std::cerr << "Unknown or incomplete argument: " << argument << '\n';
       return 2;
@@ -204,14 +211,6 @@ int main(int argc, char ** argv)
   PacketSocketServer lidar_server(lidar_socket_path, m20::ros::kPointCloudWireMagic);
   PacketSocketServer imu_server(imu_socket_path, m20::ros::kImuWireMagic);
   std::string error;
-  if (!lidar_server.start(error)) {
-    std::cerr << "Cannot start point-cloud socket server: " << error << '\n';
-    return 1;
-  }
-  if (enable_imu && !imu_server.start(error)) {
-    std::cerr << "Cannot start IMU socket server: " << error << '\n';
-    return 1;
-  }
   auto lidar_source = m20::ros::DrddsPointCloudSource::create(
     lidar_options,
     [&lidar_server](m20::ros::DrddsPointCloud && cloud) {
@@ -239,6 +238,51 @@ int main(int argc, char ** argv)
             << " domain=" << lidar_options.domain_id << " prefix=" << lidar_options.topic_prefix
             << " lidar_socket=" << lidar_socket_path
             << " imu_socket=" << (enable_imu ? imu_socket_path : "disabled") << std::endl;
+  if (wait_for_data_ms > 0) {
+    const auto deadline = std::chrono::steady_clock::now() +
+      std::chrono::milliseconds(wait_for_data_ms);
+    while (running && std::chrono::steady_clock::now() < deadline) {
+      const bool lidar_ready =
+        lidar_source->matchedPublishers() > 0 && lidar_source->updatedWithin(2500);
+      const bool imu_ready = !imu_source ||
+        (imu_source->matchedPublishers() > 0 && imu_source->updatedWithin(2500));
+      if (lidar_ready && imu_ready) {
+        std::cout << "DrDDS live sensor preflight passed" << std::endl;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    const bool lidar_ready =
+      lidar_source->matchedPublishers() > 0 && lidar_source->updatedWithin(2500);
+    const bool imu_ready = !imu_source ||
+      (imu_source->matchedPublishers() > 0 && imu_source->updatedWithin(2500));
+    if (!running) {
+      return 130;
+    }
+    if (!lidar_ready || !imu_ready) {
+      std::cerr << "DrDDS live sensor preflight failed after " << wait_for_data_ms
+                << " ms: lidar(matched=" << lidar_source->matchedPublishers()
+                << " updated=" << (lidar_source->updatedWithin(2500) ? "yes" : "no")
+                << ")";
+      if (imu_source) {
+        std::cerr << " imu(matched=" << imu_source->matchedPublishers()
+                  << " updated=" << (imu_source->updatedWithin(2500) ? "yes" : "no")
+                  << ")";
+      }
+      std::cerr << std::endl;
+      return 3;
+    }
+  }
+  // Socket creation is the parent script's readiness signal.  Do not expose
+  // it until both live DDS inputs have actually matched and delivered data.
+  if (!lidar_server.start(error)) {
+    std::cerr << "Cannot start point-cloud socket server: " << error << '\n';
+    return 1;
+  }
+  if (enable_imu && !imu_server.start(error)) {
+    std::cerr << "Cannot start IMU socket server: " << error << '\n';
+    return 1;
+  }
   while (running) {
     std::this_thread::sleep_for(std::chrono::seconds(2));
     std::cout << "DrDDS status: cloud(matched=" << lidar_source->matchedPublishers()

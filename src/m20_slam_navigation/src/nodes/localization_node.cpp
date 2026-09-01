@@ -16,7 +16,12 @@
 #include <lifecycle_msgs/msg/state.hpp>
 #include <lifecycle_msgs/msg/transition.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#if __has_include(<rclcpp/generic_subscription.hpp>)
 #include <rclcpp/generic_subscription.hpp>
+#define M20_HAS_RCLCPP_GENERIC_SUBSCRIPTION 1
+#else
+#define M20_HAS_RCLCPP_GENERIC_SUBSCRIPTION 0
+#endif
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/serialized_message.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
@@ -131,7 +136,9 @@ public:
     imu_sub_.reset();
     leg_odom_sub_.reset();
     initial_pose_sub_.reset();
+#if M20_HAS_RCLCPP_GENERIC_SUBSCRIPTION
     rtk_sub_.reset();
+#endif
     odom_pub_.reset();
     global_map_pub_.reset();
     body_cloud_pub_.reset();
@@ -427,6 +434,7 @@ private:
               onInitialPose(*message);
             });
 
+#if M20_HAS_RCLCPP_GENERIC_SUBSCRIPTION
     if (!rtk_ros_type_.empty()) {
       rtk_sub_ = create_generic_subscription(
           runtime_params_.topics.input_rtk, rtk_ros_type_,
@@ -442,11 +450,18 @@ private:
           "Native RTK topic %s is configured but not subscribed: generated DrDDS type unavailable",
           runtime_params_.topics.input_rtk.c_str());
     }
+#else
+    RCLCPP_WARN(
+        get_logger(),
+        "Native RTK topic %s is not subscribed: this ROS 2 release has no generic subscription API",
+        runtime_params_.topics.input_rtk.c_str());
+#endif
   }
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr preprocessCloud(
       const pcl::PointCloud<pcl::PointXYZ>::Ptr& input) const {
-    auto skipped = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr skipped(
+        new pcl::PointCloud<pcl::PointXYZ>());
     skipped->reserve((input->size() + cloud_skip_num_ - 1U) / cloud_skip_num_);
     for (std::size_t i = 0; i < input->size(); i += cloud_skip_num_) {
       const auto& point = input->points[i];
@@ -455,7 +470,8 @@ private:
       }
     }
     if (cloud_leaf_size_ <= 0.0 || skipped->empty()) return skipped;
-    auto output = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr output(
+        new pcl::PointCloud<pcl::PointXYZ>());
     pcl::VoxelGrid<pcl::PointXYZ> voxel;
     voxel.setInputCloud(skipped);
     const float leaf = static_cast<float>(cloud_leaf_size_);
@@ -468,7 +484,7 @@ private:
       const pcl::PointCloud<pcl::PointXYZ>::Ptr& input) const {
     auto bounded = input;
     if (body_box_filter_) {
-      bounded = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+      bounded.reset(new pcl::PointCloud<pcl::PointXYZ>());
       pcl::CropBox<pcl::PointXYZ> crop;
       crop.setInputCloud(input);
       crop.setMin(Eigen::Vector4f(
@@ -482,7 +498,8 @@ private:
     if (!body_voxel_filter_ || body_voxel_leaf_size_ <= 0.0 || bounded->empty()) {
       return bounded;
     }
-    auto output = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr output(
+        new pcl::PointCloud<pcl::PointXYZ>());
     pcl::VoxelGrid<pcl::PointXYZ> voxel;
     voxel.setInputCloud(bounded);
     const float leaf = static_cast<float>(body_voxel_leaf_size_);
@@ -492,7 +509,8 @@ private:
   }
 
   void onLidar(const sensor_msgs::msg::PointCloud2& message) {
-    auto input = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr input(
+        new pcl::PointCloud<pcl::PointXYZ>());
     pcl::fromROSMsg(message, *input);
     if (input->empty()) return;
 
@@ -591,7 +609,7 @@ private:
     if (!map || map->empty() || !global_map_pub_) return;
     auto visual_map = map;
     if (map_visual_leaf_size_ > 0.0) {
-      visual_map = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+      visual_map.reset(new pcl::PointCloud<pcl::PointXYZ>());
       pcl::VoxelGrid<pcl::PointXYZ> voxel;
       voxel.setInputCloud(map);
       const float leaf = static_cast<float>(map_visual_leaf_size_);
@@ -697,7 +715,9 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr leg_odom_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
       initial_pose_sub_;
+#if M20_HAS_RCLCPP_GENERIC_SUBSCRIPTION
   rclcpp::GenericSubscription::SharedPtr rtk_sub_;
+#endif
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr global_map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr body_cloud_pub_;

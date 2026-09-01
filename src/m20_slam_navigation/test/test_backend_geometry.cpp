@@ -13,19 +13,29 @@ using m20::Scalar;
 using m20::backend::FactorGraph;
 using m20::backend::LoopClosureDetector;
 
+void addPoint(const pcl::PointCloud<pcl::PointXYZI>::Ptr& cloud,
+              float x, float y, float z) {
+  pcl::PointXYZI point;
+  point.x = x;
+  point.y = y;
+  point.z = z;
+  cloud->push_back(point);
+}
+
 pcl::PointCloud<pcl::PointXYZI>::Ptr makeRoom() {
-  auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+  pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(
+      new pcl::PointCloud<pcl::PointXYZI>());
   for (int i = 0; i < 80; ++i) {
     const float x = -4.0F + static_cast<float>(i) * 0.1F;
-    cloud->push_back(pcl::PointXYZI{x, -2.0F, 0.0F});
-    cloud->push_back(pcl::PointXYZI{x,  2.0F, 0.0F});
-    cloud->push_back(pcl::PointXYZI{x, -2.0F, 2.0F});
-    cloud->push_back(pcl::PointXYZI{x,  2.0F, 2.0F});
+    addPoint(cloud, x, -2.0F, 0.0F);
+    addPoint(cloud, x,  2.0F, 0.0F);
+    addPoint(cloud, x, -2.0F, 2.0F);
+    addPoint(cloud, x,  2.0F, 2.0F);
   }
   for (int i = 0; i < 40; ++i) {
     const float y = -2.0F + static_cast<float>(i) * 0.1F;
-    cloud->push_back(pcl::PointXYZI{-4.0F, y, 1.0F});
-    cloud->push_back(pcl::PointXYZI{ 4.0F, y, 1.0F});
+    addPoint(cloud, -4.0F, y, 1.0F);
+    addPoint(cloud,  4.0F, y, 1.0F);
   }
   return cloud;
 }

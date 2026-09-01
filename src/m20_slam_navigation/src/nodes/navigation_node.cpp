@@ -43,7 +43,11 @@
 #include <tf2/time.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
+#if __has_include(<tf2_geometry_msgs/tf2_geometry_msgs.hpp>)
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#else
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#endif
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -797,7 +801,8 @@ private:
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr filterNativeTerrainCloud(
       const pcl::PointCloud<pcl::PointXYZI>::Ptr& input) const {
-    auto bounded = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+    pcl::PointCloud<pcl::PointXYZI>::Ptr bounded(
+        new pcl::PointCloud<pcl::PointXYZI>());
     bounded->reserve(input ? input->size() : 0);
     if (!input) return bounded;
 
@@ -829,7 +834,8 @@ private:
 
     pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled = bounded;
     if (terrain_params_.pass_grid_leaf_size > 0.0) {
-      auto voxel_cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+      pcl::PointCloud<pcl::PointXYZI>::Ptr voxel_cloud(
+          new pcl::PointCloud<pcl::PointXYZI>());
       pcl::VoxelGrid<pcl::PointXYZI> voxel;
       voxel.setInputCloud(bounded);
       const float leaf = static_cast<float>(terrain_params_.pass_grid_leaf_size);
@@ -843,7 +849,8 @@ private:
       return downsampled;
     }
 
-    auto denoised = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+    pcl::PointCloud<pcl::PointXYZI>::Ptr denoised(
+        new pcl::PointCloud<pcl::PointXYZI>());
     pcl::RadiusOutlierRemoval<pcl::PointXYZI> radius_filter;
     radius_filter.setInputCloud(downsampled);
     radius_filter.setRadiusSearch(
@@ -868,7 +875,8 @@ private:
     }
     if (!use_fallback_terrain || !traversability_map_) return;
 
-    auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(
+        new pcl::PointCloud<pcl::PointXYZI>());
     try {
       pcl::fromROSMsg(msg, *cloud);
     } catch (...) {

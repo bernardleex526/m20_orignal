@@ -171,7 +171,8 @@ TEST(NativeNavigationContract, TerrainFallbackUsesWorldFrameAndDoesNotAccumulate
   params.max_range = 10.0;
   m20::terrain::TraversabilityMap map(params);
 
-  auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
+  pcl::PointCloud<pcl::PointXYZI>::Ptr cloud(
+      new pcl::PointCloud<pcl::PointXYZI>());
   for (int ix = -5; ix <= 5; ++ix) {
     for (int iy = -5; iy <= 5; ++iy) {
       pcl::PointXYZI point;
