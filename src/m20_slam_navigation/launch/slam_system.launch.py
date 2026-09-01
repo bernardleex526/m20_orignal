@@ -75,7 +75,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "drdds_socket_path", default_value="/tmp/m20_drdds_lidar.sock"
             ),
-            DeclareLaunchArgument("imu_topic", default_value="/IMU"),
+            DeclareLaunchArgument("imu_topic", default_value="/IMU_YESENSE"),
             DeclareLaunchArgument("imu_transport", default_value="drdds"),
             DeclareLaunchArgument(
                 "drdds_imu_socket_path", default_value="/tmp/m20_drdds_imu.sock"

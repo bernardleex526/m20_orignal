@@ -11,6 +11,8 @@ BAG_PATH=""
 VENDOR_MAP_DIR=""
 USE_RVIZ="true"
 INPUT_TRANSPORT="drdds"
+IMU_TOPIC="/IMU_YESENSE"
+IMU_TOPIC_EXPLICIT="false"
 TAKEOVER_VENDOR_OUTPUTS="false"
 FORCE_BUILD="false"
 SKIP_BUILD="false"
@@ -30,6 +32,7 @@ usage() {
     "  --domain ID           ROS_DOMAIN_ID (default: current or 0)" \
     "  --no-rviz             do not start RViz" \
     "  --input-transport T   live input: drdds or ros2 (default: drdds)" \
+    "  --imu-topic TOPIC     live IMU topic (default: /IMU_YESENSE; bag: /IMU)" \
     "  --takeover-vendor-outputs  publish vendor topic names and TF (requires vendor SLAM stopped)" \
     "  --build               force a clean package rebuild" \
     "  --skip-build          use the existing install space" \
@@ -66,6 +69,11 @@ while (($#)); do
       INPUT_TRANSPORT="${2:?missing input transport}"
       shift 2
       ;;
+    --imu-topic)
+      IMU_TOPIC="${2:?missing IMU topic}"
+      IMU_TOPIC_EXPLICIT="true"
+      shift 2
+      ;;
     --takeover-vendor-outputs)
       TAKEOVER_VENDOR_OUTPUTS="true"
       shift
@@ -94,6 +102,9 @@ if [[ "${INPUT_TRANSPORT}" != "drdds" && "${INPUT_TRANSPORT}" != "ros2" ]]; then
   printf 'Unsupported input transport: %s (expected drdds or ros2)\n' \
     "${INPUT_TRANSPORT}" >&2
   exit 2
+fi
+if [[ -n "${BAG_PATH}" && "${IMU_TOPIC_EXPLICIT}" != "true" ]]; then
+  IMU_TOPIC="/IMU"
 fi
 
 source_ros() {
@@ -266,11 +277,15 @@ cleanup() {
     ' m20-cleanup "${expected_slam_binary}" "${watchdog_slam_pids[@]}" \
       </dev/null >/dev/null 2>&1 &
   fi
-  printf '\nSaving map to %s\n' "${MAP_PATH}"
-  if [[ -n "${BAG_PATH}" ]]; then
-    sleep 2
+  if [[ -n "${LAUNCH_PID}" ]]; then
+    printf '\nSaving map to %s\n' "${MAP_PATH}"
+    if [[ -n "${BAG_PATH}" ]]; then
+      sleep 2
+    fi
+    timeout 180 ros2 service call /m20_slam/save_map std_srvs/srv/Trigger '{}' || true
+  else
+    printf 'Mapper was not started; skipping map-save request.\n'
   fi
-  timeout 180 ros2 service call /m20_slam/save_map std_srvs/srv/Trigger '{}' || true
   stop_group() {
     local process_group="$1"
     [[ -z "${process_group}" ]] && return
@@ -321,9 +336,9 @@ cleanup() {
   fi
   wait "${BAG_PID}" 2>/dev/null || true
   wait "${LAUNCH_PID}" 2>/dev/null || true
-  if [[ -f "${MAP_PATH}" ]]; then
+  if [[ -n "${LAUNCH_PID}" && -f "${MAP_PATH}" ]]; then
     printf 'Mapping complete: %s\n' "${MAP_PATH}"
-  else
+  elif [[ -n "${LAUNCH_PID}" ]]; then
     printf 'No map file was produced. Check sensor contract and mapper logs.\n' >&2
   fi
 }
@@ -341,7 +356,7 @@ if [[ -z "${BAG_PATH}" && "${INPUT_TRANSPORT}" == "drdds" ]]; then
   # not implement a second DDS stack or republish a DDS topic.
   setsid "${DRDDS_RECEIVER}" \
     --lidar-topic /LIDAR/POINTS \
-    --imu-topic /IMU \
+    --imu-topic "${IMU_TOPIC}" \
     --domain 0 \
     --prefix rt \
     --lidar-socket /tmp/m20_drdds_lidar.sock \
@@ -390,7 +405,7 @@ setsid ros2 launch m20_slam_navigation slam_system.launch.py \
   use_sim_time:="false" \
   lidar_topic:=/LIDAR/POINTS \
   lidar_transport:="${LIDAR_TRANSPORT}" \
-  imu_topic:=/IMU \
+  imu_topic:="${IMU_TOPIC}" \
   imu_transport:="${IMU_TRANSPORT}" \
   drdds_socket_path:=/tmp/m20_drdds_lidar.sock \
   drdds_imu_socket_path:=/tmp/m20_drdds_imu.sock \
@@ -406,7 +421,7 @@ if [[ -n "${BAG_PATH}" ]]; then
   # appeared in DDS.  Otherwise the first seconds are silently missed and the
   # offline A/B result is not comparable with the vendor run.
   wait_for_subscriber /LIDAR/POINTS
-  wait_for_subscriber /IMU
+  wait_for_subscriber "${IMU_TOPIC}"
   # Slower wall-time playback changes no ROS timestamps, but gives the
   # geometry verifier enough CPU to keep every scan during offline A/B.
   setsid ros2 bag play "${BAG_PATH}" --clock --rate 0.75 &

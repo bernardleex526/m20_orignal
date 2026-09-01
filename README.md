@@ -28,10 +28,12 @@ Hybrid A* + cubic spline、DWA + LinePlanner 的对应实现，保持原厂参�
 差异约 4.7%，首尾误差约 0.05 m。原厂基线来自 NOS 实机上的 ARM64/Foxy 闭源
 `slam_ddsnode`；本仓库不能在 x86 主机上直接执行该二进制。
 
-2026-09-01 对 M20 PRO V1.1.8.7 三板实机做了只读核验：`/IMU` 为
-RELIABLE/volatile；NOS 的配置与历史 DDS 发现结果均指向 `/LIDAR/POINTS`，但本轮
-ROS 2 图检查时该话题没有实时 publisher/sample；原生 DrDDS 预检能匹配 2 个
-LiDAR publisher，但 5 秒内 `updated=no`，而 `/IMU` 为 `matched=1 updated=yes`。
+2026-09-01 对 M20 PRO V1.1.8.7 三板实机做了只读核验：AOS 原厂
+`lio_ddsnode` 明确订阅 `/LIDAR/POINTS` 与 `/IMU_YESENSE`；后者当前没有 publisher，
+而兼容通道 `/IMU` 虽有 RELIABLE/volatile publisher，频率采样仍无消息。NOS 的配置
+与历史 DDS 发现结果均指向 `/LIDAR/POINTS`，但本轮 ROS 2 图检查时该话题没有实时
+sample；GOS 可发现 2 个 publisher，同样未采到频率。原生 DrDDS 的历史预检能匹配
+2 个 LiDAR publisher，但 `updated=no`。
 两台雷达 `10.21.33.201/.202` 可 ping，`hsLidar` 也在监听 UDP 2361/2362，因此
 当前验收边界是“网络、端点与进程存在，点云帧未到达”，不能据此宣称真机建图
 已通过。详见
@@ -149,7 +151,8 @@ x86 工作站没有该 SDK 时使用标准 ROS 消息回退，仅用于离线合
 | 接口 | 类型 | 典型频率 | 要求 |
 |---|---|---:|---|
 | `/LIDAR/POINTS` | `sensor_msgs/msg/PointCloud2` | 10 Hz | 前后雷达融合点云，通常 96 线 |
-| `/IMU` | `sensor_msgs/msg/Imu` | 200 Hz | 原厂 IMU；当前固件可能为空 `frame_id` |
+| `/IMU_YESENSE` | `sensor_msgs/msg/Imu` | 200 Hz | AOS 原厂 LIO 的主 IMU 输入 |
+| `/IMU` | `sensor_msgs/msg/Imu` | 200 Hz | 官方 bag/NOS 兼容输入；可用 `--imu-topic` 显式选择 |
 
 LiDAR 必须提供以下字段：
 
@@ -163,13 +166,13 @@ timestamp    float64   # 每点绝对时间，单位秒
 如果没有 `timestamp`，只能退化为整帧时间，deskew 和点到平面精度都会下降；如果
 没有 `ring`，仍可运行，但无法完整匹配原厂点云语义。
 
-实时 M20Pro 默认契约：
+实时 M20Pro 传感器总线契约及本适配器接入方式：
 
 ```text
 ROS_DOMAIN_ID=0
 DDS prefix=rt
-network=eth0/eth1
-shared memory=true
+network=DrDDSManager 默认网卡选择
+adapter shared memory=false
 ```
 
 ## 输出接口
@@ -187,8 +190,8 @@ shared memory=true
 | `/m20_slam/path` | `nav_msgs/msg/Path` |
 | `/m20_slam/save_map` | `std_srvs/srv/Trigger` |
 
-显式加入 `--takeover-vendor-outputs` 后才启用以下原厂合同；此模式下本节点和原厂
-`slam_ddsnode` 不能同时运行：
+显式加入 `--takeover-vendor-outputs` 后才启用以下 NOS `slam_ddsnode` 兼容合同；
+此模式不用于本轮 AOS 并联验收，且本节点和原厂 `slam_ddsnode` 不能同时运行：
 
 | 输出 | 类型 |
 |---|---|
@@ -217,7 +220,7 @@ lio_trajectory.csv          # 高频 LIO 诊断轨迹
 
 ### M20Pro 实时建图
 
-在 NOS 验证工作区运行（DrDDS 网关需要 root 权限）：
+点云与 IMU 恢复后，在 AOS 部署目录以普通用户运行：
 
 ```bash
 cd ~/m20_orignal
@@ -309,7 +312,7 @@ ros2 launch m20_slam_navigation m20_full_system.launch.py \
 lio.voxel_size                  0.16
 lio.leaf_size                   0.15
 lio.leaf_size_body              0.05
-lio.skip_num                    5
+lio.skip_num                    9
 lio.max_iteration               3
 lio.esti_plane_threshold        0.1
 lio.lidar_cov                   0.001

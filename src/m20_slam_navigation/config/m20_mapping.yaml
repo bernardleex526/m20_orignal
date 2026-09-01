@@ -4,7 +4,9 @@ slam_node:
     lidar_topic: /LIDAR/POINTS
     # Read the already fused front/rear cloud directly from the vendor DrDDS bus.
     lidar_transport: drdds
-    imu_topic: /IMU
+    # AOS lio-perception V1.1.8.7 consumes the Yesense channel directly.
+    # start_mapping.sh switches this to /IMU for the official offline bag.
+    imu_topic: /IMU_YESENSE
     imu_transport: drdds
     drdds.domain_id: 0
     drdds.use_shm: false
@@ -62,7 +64,7 @@ slam_node:
     lio.enable_downsample: true
     lio.leaf_size: 0.15
     lio.leaf_size_body: 0.05
-    lio.skip_num: 5
+    lio.skip_num: 9
     # Bound latency on NOS: stale scans are less useful than current pairs.
     lio.max_lidar_queue_size: 3
     lio.max_voxels: 500000
@@ -80,26 +82,27 @@ slam_node:
     lio.init_time: 0.1
     # dr_lio::MAX_INI_COUNT; at 200 Hz this is about one second of samples.
     lio.imu_init_samples: 200
-    lio.acc_cov: 0.5
-    lio.gyr_cov: 0.5
-    lio.b_acc_cov: 0.001
-    lio.b_gyr_cov: 0.001
+    lio.acc_cov: 0.8
+    lio.gyr_cov: 0.8
+    lio.b_acc_cov: 0.01
+    lio.b_gyr_cov: 0.01
     lio.save_full_pcd: false
     lio.full_map_save_path: /var/opt/robot/data/maps/active/full_cloud.pcd
 
-    # Vendor accumulated_points contract. The native configuration disables
-    # this callback by default; when enabled it publishes a robot-local crop in
-    # base_link, not the global voxel-debug cloud.
-    accumulated_points.enable: false
-    accumulated_points.level: 3
+    # Exact AOS lio-perception V1.1.8.7 local-cloud contract. This is a
+    # robot-local crop in base_link, not the global voxel-debug cloud.
+    accumulated_points.enable: true
+    accumulated_points.level: 2
     accumulated_points.area_min: [-5.0, -5.0, -1.0]
     accumulated_points.area_max: [5.0, 5.0, 1.0]
+    # The vendor lio_ddsnode already owns UDP 30100. Keep using that service
+    # instead of binding a duplicate endpoint from the parallel adapter.
     accumulated_points.udp_output.enable: false
-    accumulated_points.udp_output.resolution: 0.1
+    accumulated_points.udp_output.resolution: 0.2
     accumulated_points.udp_output.port: 30100
 
-    voxel_map.ray_casting: false
-    voxel_map.ray_casting_level: 3
+    voxel_map.ray_casting: true
+    voxel_map.ray_casting_level: 2
     voxel_map.ray_casting_range: 3.0
     voxel_map.ray_dis_th: 0.02
     voxel_map.depth_image.enable: false

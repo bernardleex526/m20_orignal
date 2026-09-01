@@ -259,7 +259,7 @@ private:
     declare_parameter<std::string>("drdds.topic_prefix", "rt");
     declare_parameter<std::string>("drdds.network_name", "");
     declare_parameter<std::string>("drdds.socket_path", "/tmp/m20_drdds_lidar.sock");
-    declare_parameter<std::string>("imu_topic", "/IMU");
+    declare_parameter<std::string>("imu_topic", "/IMU_YESENSE");
     declare_parameter<std::string>("imu_transport", "ros2");
     declare_parameter<std::string>("drdds.imu_socket_path", "/tmp/m20_drdds_imu.sock");
     declare_parameter<std::string>("output_odom_topic", "/m20_slam/odom");
@@ -308,7 +308,7 @@ private:
     declare_parameter<bool>("lio.enable_downsample", true);
     declare_parameter<double>("lio.leaf_size", 0.15);
     declare_parameter<double>("lio.leaf_size_body", 0.05);
-    declare_parameter<int>("lio.skip_num", 5);
+    declare_parameter<int>("lio.skip_num", 9);
     declare_parameter<int>("lio.max_lidar_queue_size", 3);
     declare_parameter<int>("lio.max_voxels", 500000);
     declare_parameter<double>("lio.keyframe_distance", 0.8);
@@ -322,22 +322,22 @@ private:
     declare_parameter<bool>("lio.extrinsic_est_en", false);
     declare_parameter<double>("lio.init_time", 0.1);
     declare_parameter<int>("lio.imu_init_samples", 200);
-    declare_parameter<double>("lio.acc_cov", 0.5);
-    declare_parameter<double>("lio.gyr_cov", 0.5);
-    declare_parameter<double>("lio.b_acc_cov", 0.001);
-    declare_parameter<double>("lio.b_gyr_cov", 0.001);
+    declare_parameter<double>("lio.acc_cov", 0.8);
+    declare_parameter<double>("lio.gyr_cov", 0.8);
+    declare_parameter<double>("lio.b_acc_cov", 0.01);
+    declare_parameter<double>("lio.b_gyr_cov", 0.01);
 
-    declare_parameter<bool>("accumulated_points.enable", false);
-    declare_parameter<int>("accumulated_points.level", 3);
+    declare_parameter<bool>("accumulated_points.enable", true);
+    declare_parameter<int>("accumulated_points.level", 2);
     declare_parameter<std::vector<double>>(
       "accumulated_points.area_min", {-5.0, -5.0, -1.0});
     declare_parameter<std::vector<double>>(
       "accumulated_points.area_max", {5.0, 5.0, 1.0});
     declare_parameter<bool>("accumulated_points.udp_output.enable", false);
-    declare_parameter<double>("accumulated_points.udp_output.resolution", 0.1);
+    declare_parameter<double>("accumulated_points.udp_output.resolution", 0.2);
     declare_parameter<int>("accumulated_points.udp_output.port", 30100);
-    declare_parameter<bool>("voxel_map.ray_casting", false);
-    declare_parameter<int>("voxel_map.ray_casting_level", 3);
+    declare_parameter<bool>("voxel_map.ray_casting", true);
+    declare_parameter<int>("voxel_map.ray_casting_level", 2);
     declare_parameter<double>("voxel_map.ray_casting_range", 3.0);
     declare_parameter<double>("voxel_map.ray_dis_th", 0.02);
     declare_parameter<bool>("voxel_map.depth_image.enable", false);

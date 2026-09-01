@@ -39,7 +39,7 @@ struct DrddsImu
 
 struct DrddsImuSourceOptions
 {
-  std::string topic{"/IMU"};
+  std::string topic{"/IMU_YESENSE"};
   int domain_id{0};
   bool use_shm{false};
   std::string topic_prefix{"rt"};
